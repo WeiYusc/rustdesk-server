@@ -27,6 +27,7 @@ use std::{
     net::SocketAddr,
     sync::atomic::{AtomicUsize, Ordering},
 };
+use subtle::ConstantTimeEq;
 
 type Usage = (usize, usize, usize, usize);
 
@@ -44,6 +45,10 @@ static TOTAL_BANDWIDTH: AtomicUsize = AtomicUsize::new(1024 * 1024 * 1024); // i
 static SINGLE_BANDWIDTH: AtomicUsize = AtomicUsize::new(128 * 1024 * 1024); // in bit/s
 const BLACKLIST_FILE: &str = "blacklist.txt";
 const BLOCKLIST_FILE: &str = "blocklist.txt";
+
+fn licence_key_matches(expected: &str, actual: &str) -> bool {
+    expected.as_bytes().ct_eq(actual.as_bytes()).into()
+}
 
 #[tokio::main(flavor = "multi_thread")]
 pub async fn start(port: &str, key: &str) -> ResultType<()> {
@@ -405,13 +410,7 @@ async fn make_pair(
                 .get("X-Real-IP")
                 .or_else(|| headers.get("X-Forwarded-For"))
                 .and_then(|header_value| header_value.to_str().ok());
-            if let Some(ip) = real_ip {
-                if ip.contains('.') {
-                    addr = format!("{ip}:0").parse().unwrap_or(addr);
-                } else {
-                    addr = format!("[{ip}]:0").parse().unwrap_or(addr);
-                }
-            }
+            addr = crate::common::websocket_peer_addr(addr, real_ip);
             Ok(response)
         };
         let ws_stream = tokio_tungstenite::accept_hdr_async(stream, callback).await?;
@@ -427,7 +426,7 @@ async fn make_pair_(stream: impl StreamTrait, addr: SocketAddr, key: &str, limit
     if let Ok(Some(Ok(bytes))) = timeout(30_000, stream.recv()).await {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(&bytes) {
             if let Some(rendezvous_message::Union::RequestRelay(rf)) = msg_in.union {
-                if !key.is_empty() && rf.licence_key != key {
+                if !key.is_empty() && !licence_key_matches(key, &rf.licence_key) {
                     log::warn!("Relay authentication failed from {} - invalid key", addr);
                     return;
                 }

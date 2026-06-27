@@ -41,6 +41,7 @@ use std::{
     sync::Arc,
     time::Instant,
 };
+use subtle::ConstantTimeEq;
 
 #[derive(Clone, Debug)]
 enum Data {
@@ -70,6 +71,10 @@ use tokio::sync::Mutex as TokioMutex; // differentiate if needed
 struct PunchReqEntry { tm: Instant, from_ip: String, to_ip: String, to_id: String }
 static PUNCH_REQS: Lazy<TokioMutex<Vec<PunchReqEntry>>> = Lazy::new(|| TokioMutex::new(Vec::new()));
 const PUNCH_REQ_DEDUPE_SEC: u64 = 60;
+
+fn licence_key_matches(expected: &str, actual: &str) -> bool {
+    expected.as_bytes().ct_eq(actual.as_bytes()).into()
+}
 
 #[derive(Deserialize)]
 struct LoginClaims {
@@ -901,8 +906,12 @@ impl RendezvousServer {
             );
             return Ok((login_required_response(), None));
         }
-        if !key.is_empty() && ph.licence_key != key {
-            log::warn!("Authentication failed from {} for peer {} - invalid key", addr, ph.id);
+        if !key.is_empty() && !licence_key_matches(key, &ph.licence_key) {
+            log::warn!(
+                "Authentication failed from {} for peer {} - invalid key",
+                addr,
+                ph.id
+            );
             let mut msg_out = RendezvousMessage::new();
             msg_out.set_punch_hole_response(PunchHoleResponse {
                 failure: punch_hole_response::Failure::LICENSE_MISMATCH.into(),
@@ -1379,13 +1388,7 @@ impl RendezvousServer {
                     .get("X-Real-IP")
                     .or_else(|| headers.get("X-Forwarded-For"))
                     .and_then(|header_value| header_value.to_str().ok());
-                if let Some(ip) = real_ip {
-                    if ip.contains('.') {
-                        addr = format!("{ip}:0").parse().unwrap_or(addr);
-                    } else {
-                        addr = format!("[{ip}]:0").parse().unwrap_or(addr);
-                    }
-                }
+                addr = crate::common::websocket_peer_addr(addr, real_ip);
                 Ok(response)
             };
             let ws_stream = tokio_tungstenite::accept_hdr_async(stream, callback).await?;

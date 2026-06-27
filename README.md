@@ -26,6 +26,12 @@ Three executables will be generated in target/release.
 
 You can find updated binaries on the [Releases](https://github.com/rustdesk/rustdesk-server/releases) page.
 
+## Reverse proxy headers
+
+When WebSocket traffic is served through a reverse proxy, `hbbs` and `hbbr` use `X-Real-IP` / `X-Forwarded-For` only from loopback proxy connections by default. This preserves local reverse-proxy deployments without trusting spoofable headers from directly connected public clients.
+
+If your trusted reverse proxy connects from a non-loopback address, set `TRUST_PROXY_HEADERS=1` (or `TRUST-PROXY-HEADERS=1` in config-style environments). Enable this only when network ACLs ensure clients cannot connect directly to the RustDesk WebSocket ports, and configure the proxy to strip inbound forwarding headers before setting its own client IP header.
+
 If you want extra features, [RustDesk Server Pro](https://rustdesk.com/pricing.html) might suit you better.
 
 If you want to develop your own server, [rustdesk-server-demo](https://github.com/rustdesk/rustdesk-server-demo) might be a better and simpler start for you than this repo.

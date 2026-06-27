@@ -1,6 +1,8 @@
 use clap::App;
 use hbb_common::{
-    allow_err, anyhow::{Context, Result}, get_version_number, log, tokio, ResultType
+    allow_err,
+    anyhow::{Context, Result},
+    get_version_number, log, tokio, ResultType,
 };
 use ini::Ini;
 use sodiumoxide::crypto::sign;
@@ -44,6 +46,93 @@ pub(crate) fn get_servers(s: &str, tag: &str) -> Vec<String> {
         .collect();
     log::info!("{}={:?}", tag, servers);
     servers
+}
+
+pub(crate) fn websocket_peer_addr(
+    socket_addr: SocketAddr,
+    real_ip_header: Option<&str>,
+) -> SocketAddr {
+    let trust_proxy_headers = std::env::var("TRUST-PROXY-HEADERS")
+        .or_else(|_| std::env::var("TRUST_PROXY_HEADERS"))
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false);
+    websocket_peer_addr_with_trust(socket_addr, real_ip_header, trust_proxy_headers)
+}
+
+fn websocket_peer_addr_with_trust(
+    socket_addr: SocketAddr,
+    real_ip_header: Option<&str>,
+    trust_proxy_headers: bool,
+) -> SocketAddr {
+    if !trust_proxy_headers && !socket_addr.ip().is_loopback() {
+        return socket_addr;
+    }
+    let Some(ip) = real_ip_header.and_then(first_forwarded_ip) else {
+        return socket_addr;
+    };
+    if ip.contains('.') {
+        format!("{ip}:0").parse().unwrap_or(socket_addr)
+    } else {
+        format!("[{ip}]:0").parse().unwrap_or(socket_addr)
+    }
+}
+
+fn first_forwarded_ip(value: &str) -> Option<&str> {
+    value.split(',').map(str::trim).find(|ip| !ip.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn websocket_peer_addr_ignores_forwarded_header_from_direct_public_client_by_default() {
+        let socket_addr: SocketAddr = "203.0.113.10:21118".parse().unwrap();
+
+        assert_eq!(
+            websocket_peer_addr_with_trust(socket_addr, Some("198.51.100.20"), false),
+            socket_addr
+        );
+    }
+
+    #[test]
+    fn websocket_peer_addr_trusts_forwarded_header_from_loopback_proxy() {
+        let socket_addr: SocketAddr = "127.0.0.1:21118".parse().unwrap();
+
+        assert_eq!(
+            websocket_peer_addr_with_trust(socket_addr, Some("198.51.100.20"), false),
+            "198.51.100.20:0".parse().unwrap()
+        );
+    }
+
+    #[test]
+    fn websocket_peer_addr_can_explicitly_trust_non_loopback_proxy() {
+        let socket_addr: SocketAddr = "192.0.2.10:21118".parse().unwrap();
+
+        assert_eq!(
+            websocket_peer_addr_with_trust(socket_addr, Some("198.51.100.20"), true),
+            "198.51.100.20:0".parse().unwrap()
+        );
+    }
+
+    #[test]
+    fn websocket_peer_addr_uses_first_forwarded_ip() {
+        let socket_addr: SocketAddr = "127.0.0.1:21118".parse().unwrap();
+
+        assert_eq!(
+            websocket_peer_addr_with_trust(
+                socket_addr,
+                Some(" 198.51.100.20, 203.0.113.30"),
+                false
+            ),
+            "198.51.100.20:0".parse().unwrap()
+        );
+    }
 }
 
 #[allow(dead_code)]
@@ -141,7 +230,7 @@ pub fn gen_sk(wait: u64) -> (String, Option<sign::SecretKey>) {
         let pub_file = format!("{sk_file}.pub");
         if let Ok(mut f) = std::fs::File::create(&pub_file) {
             f.write_all(pk.as_bytes()).ok();
-            if let Ok(mut f) = std::fs::File::create(sk_file) {
+            if let Ok(mut f) = create_private_key_file(sk_file) {
                 let s = base64::encode(&sk);
                 if f.write_all(s.as_bytes()).is_ok() {
                     log::info!("Private/public key written to {}/{}", sk_file, pub_file);
@@ -152,6 +241,29 @@ pub fn gen_sk(wait: u64) -> (String, Option<sign::SecretKey>) {
         }
     }
     ("".to_owned(), None)
+}
+
+#[cfg(unix)]
+fn create_private_key_file(path: &str) -> std::io::Result<std::fs::File> {
+    use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+    let file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    Ok(file)
+}
+
+#[cfg(not(unix))]
+fn create_private_key_file(path: &str) -> std::io::Result<std::fs::File> {
+    std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(path)
 }
 
 #[cfg(unix)]
@@ -189,7 +301,6 @@ pub async fn listen_signal() -> Result<()> {
     unreachable!();
 }
 
-
 pub fn check_software_update() {
     const ONE_DAY_IN_SECONDS: u64 = 60 * 60 * 24;
     std::thread::spawn(move || loop {
@@ -200,8 +311,10 @@ pub fn check_software_update() {
 
 #[tokio::main(flavor = "current_thread")]
 async fn check_software_update_() -> hbb_common::ResultType<()> {
-    let (request, url) = hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_SERVER.to_string());
-    let latest_release_response = reqwest::Client::builder().build()?
+    let (request, url) =
+        hbb_common::version_check_request(hbb_common::VER_TYPE_RUSTDESK_SERVER.to_string());
+    let latest_release_response = reqwest::Client::builder()
+        .build()?
         .post(url)
         .json(&request)
         .send()
@@ -212,7 +325,7 @@ async fn check_software_update_() -> hbb_common::ResultType<()> {
     let response_url = resp.url;
     let latest_release_version = response_url.rsplit('/').next().unwrap_or_default();
     if get_version_number(&latest_release_version) > get_version_number(crate::version::VERSION) {
-       log::info!("new version is available: {}", latest_release_version);
+        log::info!("new version is available: {}", latest_release_version);
     }
     Ok(())
 }
