@@ -1,0 +1,45 @@
+name: rustdesk-server-baseline
+
+services:
+  hbbr:
+    build:
+      context: ../..
+      dockerfile: docker/compose-baseline/Dockerfile
+    image: rustdesk-server-baseline:local
+    command: ["hbbr"]
+    volumes:
+      - rustdesk-server-data:/data
+    ports:
+      - "127.0.0.1:23117:21117/tcp"
+      - "127.0.0.1:23119:21119/tcp"
+    healthcheck:
+      test: ["CMD", "rustdesk-healthcheck", "hbbr"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
+    restart: unless-stopped
+
+  hbbs:
+    image: rustdesk-server-baseline:local
+    command: ["hbbs", "-r", "hbbr:21117"]
+    depends_on:
+      hbbr:
+        condition: service_healthy
+    volumes:
+      - rustdesk-server-data:/data
+    ports:
+      - "127.0.0.1:23115:21115/tcp"
+      - "127.0.0.1:23116:21116/tcp"
+      - "127.0.0.1:23116:21116/udp"
+      - "127.0.0.1:23118:21118/tcp"
+    healthcheck:
+      test: ["CMD", "rustdesk-healthcheck", "hbbs"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 2s
+    restart: unless-stopped
+
+volumes:
+  rustdesk-server-data:
