@@ -35,6 +35,8 @@ RUSTDESK_FULL_S6_IMAGE=example/rustdesk-server-full-s6:dev \
 
 The build script copies the API repo into a temporary directory before running `go build` because the current API module requires `GOFLAGS=-mod=mod`, which can rewrite `go.mod` if run directly in the source checkout.
 
+The Dockerfile verifies the downloaded s6-overlay tarballs before extraction. The default checksum arguments cover the local x86_64 build path. If you override `S6_OVERLAY_VERSION`, provide matching `S6_OVERLAY_NOARCH_SHA256` and `S6_OVERLAY_ARCH_SHA256`; if you override `S6_ARCH`, also provide the matching `S6_OVERLAY_ARCH_SHA256`. Non-default architectures without an explicit architecture checksum fail closed instead of extracting an unverified tarball.
+
 ## Smoke Test
 
 ```bash
@@ -95,6 +97,10 @@ Optional key injection follows the upstream s6-compatible behavior:
 - Environment variables: `KEY_PUB` and `KEY_PRIV`.
 
 If neither is provided, `hbbs` generates a new keypair in `/data` on first boot.
+
+## Runtime Hardening Boundary
+
+The integrated image currently follows the upstream s6-overlay pattern and starts as root so PID 1 supervision, key injection, key ownership fixes, and mounted `/data` / `/app/data` writes continue to work. A non-root runtime remains a separate hardening slice that must be paired with image smoke validation and volume ownership handling.
 
 ## Verification Boundary
 

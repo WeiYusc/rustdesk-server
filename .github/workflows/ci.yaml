@@ -1,0 +1,68 @@
+name: ci
+
+permissions:
+  contents: read
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+      - main
+
+jobs:
+  rust:
+    name: Rust checks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Check whitespace
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags --depth=1 origin "${{ github.base_ref }}"
+            git diff --check "origin/${{ github.base_ref }}...HEAD"
+          else
+            git diff --check HEAD~1..HEAD
+          fi
+
+      - name: Check formatting
+        run: rustfmt --edition 2021 --check src/lib.rs src/main.rs src/hbbr.rs src/utils.rs src/common.rs src/database.rs src/peer.rs src/rendezvous_server.rs src/relay_server.rs
+
+      - name: Check build
+        run: cargo check --workspace --locked
+
+      - name: Run tests
+        run: cargo test --workspace --locked
+
+  scripts:
+    name: Script syntax checks
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check Bash scripts
+        run: bash -n scripts/*.sh
+
+      - name: Check POSIX shell scripts
+        run: |
+          sh -n \
+            docker/full-s6/healthcheck.sh \
+            docker/full-s6/rootfs/etc/s6-overlay/s6-rc.d/hbbs/run \
+            docker/full-s6/rootfs/etc/s6-overlay/s6-rc.d/hbbr/run \
+            docker/full-s6/rootfs/etc/s6-overlay/s6-rc.d/api/run \
+            docker/full-s6/rootfs/etc/s6-overlay/s6-rc.d/key-secret/up.real \
+            docker/rootfs/usr/bin/healthcheck.sh \
+            docker/rootfs/etc/s6-overlay/s6-rc.d/hbbs/run \
+            docker/rootfs/etc/s6-overlay/s6-rc.d/hbbr/run \
+            docker/rootfs/etc/s6-overlay/s6-rc.d/key-secret/up.real
