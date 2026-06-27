@@ -1,0 +1,48 @@
+#!/command/with-contenv sh
+set -eu
+
+mkdir -p /data
+
+if [ ! -f /data/id_ed25519.pub ] && [ -r /run/secrets/key_pub ]; then
+  cp /run/secrets/key_pub /data/id_ed25519.pub
+  echo "Public key created from secret"
+fi
+
+if [ ! -f /data/id_ed25519 ] && [ -r /run/secrets/key_priv ]; then
+  cp /run/secrets/key_priv /data/id_ed25519
+  echo "Private key created from secret"
+fi
+
+if [ ! -f /data/id_ed25519.pub ] && [ -n "${KEY_PUB:-}" ]; then
+  printf '%s' "${KEY_PUB}" > /data/id_ed25519.pub
+  echo "Public key created from ENV variable"
+fi
+
+if [ ! -f /data/id_ed25519 ] && [ -n "${KEY_PRIV:-}" ]; then
+  printf '%s' "${KEY_PRIV}" > /data/id_ed25519
+  echo "Private key created from ENV variable"
+fi
+
+if [ -f /data/id_ed25519.pub ] && [ ! -f /data/id_ed25519 ]; then
+  echo "Private key missing."
+  echo "You must provide BOTH the private and the public key."
+  /run/s6/basedir/bin/halt
+  exit 1
+fi
+
+if [ ! -f /data/id_ed25519.pub ] && [ -f /data/id_ed25519 ]; then
+  echo "Public key missing."
+  echo "You must provide BOTH the private and the public key."
+  /run/s6/basedir/bin/halt
+  exit 1
+fi
+
+if [ -f /data/id_ed25519.pub ] && [ -f /data/id_ed25519 ]; then
+  chmod 0600 /data/id_ed25519.pub /data/id_ed25519
+  chown root:root /data/id_ed25519.pub /data/id_ed25519
+  /usr/bin/rustdesk-utils validatekeypair "$(cat /data/id_ed25519.pub)" "$(cat /data/id_ed25519)" || {
+    echo "Key pair not valid"
+    /run/s6/basedir/bin/halt
+    exit 1
+  }
+fi

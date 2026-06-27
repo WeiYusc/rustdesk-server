@@ -15,7 +15,7 @@ It records what is known before implementation. Do not treat `Source-present` or
 | Base commit date | `2026-02-17T01:28:35-05:00` |
 | Base commit subject | `fix(security): update mio from 0.8.5 to 0.8.11 (#633)` |
 | License posture | AGPL-3.0, following upstream |
-| Initial deployment strategy | compose-first; single full-s6 image is deferred until behavior and packaging are verified |
+| Deployment strategy | compose-first baseline retained; local full-s6 integrated image is now implemented and smoke-verified, but not yet published to Docker Hub/GHCR |
 | Paired API project | `WeiYusc/rustdesk-api` |
 | Paired frontend project | `WeiYusc/rustdesk-api-web`, built separately and injected into API release resources |
 
@@ -50,7 +50,7 @@ It records what is known before implementation. Do not treat `Source-present` or
 | Official hbbs/hbbr base | Verified | `cargo build --release` and `cargo test --release` passed in a containerized Rust toolchain; binary smoke started official `hbbr` and `hbbs` on temporary ports, with `hbbs` TCP/UDP and `hbbr` TCP listeners verified. | Keep this as the official behavior baseline before downstream API integration. |
 | Official Docker/s6 base | Partial | `docker/Dockerfile` builds the s6 rootfs image, but runtime healthcheck fails because `/usr/bin/hbbs`, `/usr/bin/hbbr`, and `/usr/bin/rustdesk-utils` are not included by that Dockerfile. | Treat upstream s6 rootfs as packaging input only until a complete binary injection path is defined. |
 | Compose-first deployment | Verified | `docker/compose-baseline/` builds a local two-service hbbs/hbbr runtime image from official Stage 1 binaries; compose smoke showed both services healthy, loopback-only published listeners, and generated key material in the named data volume. | Use this as the baseline for adding API service integration in the next stage. |
-| Full-s6 integrated image | Deferred | Official server has s6 image; API fork has `Dockerfile_full_s6`; old `rustdesk-server-s6` source is unavailable. | Defer until compose-first behavior and API integration pass. |
+| Full-s6 integrated image | Verified | `docker/full-s6/` builds a single Debian+s6 image containing `hbbs`, `hbbr`, `rustdesk-api`, and the built `rustdesk-api-web` admin assets. `scripts/smoke-full-s6-image.sh` passed against `rustdesk-server-full-s6:local`, proving s6 PID 1, `hbbr`/`hbbs`/`api` services up, generated server key material, `/_admin/` 200, admin login/current, and `/api/admin/config/server` using the configured loopback API endpoint. | Keep real two-client forced-login/connect validation as a later production gate; do not use this row to claim full RustDesk client compatibility. |
 | Forced login (`MUST_LOGIN`) | Partial | `src/rendezvous_server.rs` gates `PunchHoleRequest.token` when `MUST_LOGIN` is enabled, while unit tests prove disabled mode still allows requests and handler-level tests prove missing tokens return `LOGIN_REQUIRED` before peer lookup. Startup now also warns when `MUST_LOGIN=1` but `RUSTDESK_API_JWT_KEY` is empty, avoiding a silent all-token rejection configuration. | Pair this with API-issued tokens and a real RustDesk client/server smoke before marking login connectivity `Verified`. |
 | JWT token validation | Partial | Focused tests prove missing, invalid, empty-key, expired, generic HS256, Rust-generated API-shaped `user_id` + `exp`, Go `jwt/v5` generated API-shaped golden token, and live `WeiYusc_rustdesk-api` `/api/login` issued token acceptance using `RUSTDESK_API_JWT_KEY`; `scripts/smoke-api-token.sh` reproduces the live API-issued token gate check without logging token contents. | Verify the same login/token path through a real RustDesk client flow. |
 | rustdesk-api config contract | Verified | API fork documents `RUSTDESK_API_RUSTDESK_ID_SERVER`, relay/API/key/key-file, and JWT settings; `scripts/smoke-api-token.sh` runs the compose baseline, launches a temporary SQLite API copy with loopback-only API/server endpoints, calls `/api/login`, decodes API-shaped `user_id` + `exp` claims, and verifies the token against the server gate in an isolated Rust test copy; `scripts/smoke-real-client-register.sh` also proves a real RustDesk Linux client honors preseeded ID/relay/API server config for registration. | Add real two-client login/connect smoke before marking end-to-end forced-login connectivity `Verified`. |
@@ -67,7 +67,7 @@ It records what is known before implementation. Do not treat `Source-present` or
 | official | `#666` update hbb_common security | No local action | Open issue asks for latest `hbb_common`; current upstream `master` and this worktree both point at `libs/hbb_common` `83419b6...`, so there is no newer official submodule target visible from `rustdesk/rustdesk-server` to port in this slice. Re-check only when upstream moves the submodule. |
 | official | `#653` Docker bind mount writes client-style config | Relevant / compose mitigated | The issue concerns hbbs creating client-style config under a bind-mounted server data dir via shared `hbb_common` config paths. The compose-first baseline mounts `/data`, not `/root`, and smokes verify generated key material in the named data volume; keep monitoring before full-s6/bind-mount packaging. |
 | official | PR `#642` hardening hbbs/hbbr | Relevant / do not cherry-pick yet | Open PR proposes broad unauthenticated-abuse hardening plus protocol changes in `hbb_common`. Treat as a security-design input for a later review slice; do not mix with the current minimal `MUST_LOGIN` token gate without protocol/client compatibility review. |
-| official | PR `#425` s6 run as user | Deferred packaging hardening | Open draft PR for official s6 unprivileged runtime. Current path is compose-first and not full-s6 integrated, so defer until the full-s6 packaging stage. |
+| official | PR `#425` s6 run as user | Packaging hardening follow-up | Open draft PR for official s6 unprivileged runtime. The current full-s6 MVP still runs as root like the inherited upstream s6 pattern; evaluate unprivileged runtime as a later hardening slice after preserving smoke coverage. |
 | old fork `lejianwen/rustdesk-server` | `#52` login drops after a week | API token-expiry config / no server fix yet | Open issue shows `RUSTDESK_API_JWT_EXPIRE_DURATION` defaults to one week in the paired API deployment. Current server correctly rejects expired JWTs in tests; next action belongs in API/config docs or a real token-renewal flow, not blind server changes. |
 | old fork `lejianwen/rustdesk-server` | `#45` pub key change breaks logged-in clients | Runtime evidence needed | Open issue involves s6 deployment, changed public key, and logged-in client connection failure. Current compose baseline regenerates hbbs key material cleanly, but no real logged-in two-client flow is verified on this host; keep as a later distinct-client/key-rotation smoke gate. |
 | old fork `lejianwen/rustdesk-server` | `#47` update server version | Already addressed by base choice | The modernization base is current official `rustdesk/rustdesk-server` `master` (`815c728`), while old fork `forapi` is behind. Treat this as the reason for rebasing onto official, not a separate patch. |
@@ -105,10 +105,17 @@ It records what is known before implementation. Do not treat `Source-present` or
 - Healthchecks cover server and API processes.
 - Data dirs, logs, key material, env vars, and upgrade path are documented.
 
+### Stage 4 Gate
+
+- Full-s6 integrated image builds locally from the server, API, and API-web inputs.
+- Single-container smoke verifies `hbbr`, `hbbs`, `api`, generated key material, `/_admin/`, admin login/current, and `/api/admin/config/server`.
+- Build and smoke scripts leave the paired API/API-web source checkouts clean.
+- Image is explicitly local-only until a registry publication workflow is added and verified.
+
 ## Non-Goals
 
-- Do not implement features before Stage 0 approval is complete.
-- Do not build a single all-in-one full-s6 image before compose-first smoke is proven.
-- Do not vendor `rustdesk-api-web` or WebClient resources into this server fork.
+- Do not implement features before their stage evidence and approval are complete.
+- Do not publish Docker Hub/GHCR images until tag strategy, registry credentials, source/license notes, and release workflow are reviewed.
+- Do not vendor `rustdesk-api-web` source or WebClient resources into this server fork; the full-s6 build consumes API-web as an external build input and copies only built admin assets into the image build context.
 - Do not copy AGPL reference project UI/source/text/assets without an explicit license decision.
 - Do not claim real client compatibility without real RustDesk client/server/API smoke.

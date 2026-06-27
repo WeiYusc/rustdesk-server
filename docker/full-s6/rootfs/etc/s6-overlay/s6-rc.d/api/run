@@ -1,0 +1,6 @@
+#!/command/with-contenv sh
+set -eu
+
+mkdir -p /app/data /app/runtime
+cd /app
+exec /app/apimain -c /app/conf/config.yaml
