@@ -8,6 +8,8 @@ use hbb_common::{
     ResultType,
 };
 use serde_derive::{Deserialize, Serialize};
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::{collections::HashMap, collections::HashSet, net::SocketAddr, sync::Arc, time::Instant};
 
 type IpBlockMap = HashMap<String, ((u32, Instant), (HashSet<String>, Instant))>;
@@ -66,6 +68,26 @@ pub(crate) struct PeerMap {
 }
 
 impl PeerMap {
+    #[cfg(test)]
+    pub(crate) async fn new_for_tests() -> ResultType<Self> {
+        static NEXT_DB: AtomicUsize = AtomicUsize::new(0);
+        let db_path = std::env::temp_dir().join(format!(
+            "rustdesk-server-peer-test-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT_DB.fetch_add(1, Ordering::SeqCst)
+        ));
+        if db_path.exists() {
+            std::fs::remove_file(&db_path).ok();
+        }
+        let db = db_path.to_string_lossy().to_string();
+        let pm = Self {
+            map: Default::default(),
+            db: database::Database::new(&db).await?,
+        };
+        std::fs::remove_file(db_path).ok();
+        Ok(pm)
+    }
+
     pub(crate) async fn new() -> ResultType<Self> {
         let db = std::env::var("DB_URL").unwrap_or({
             let mut db = "db_v2.sqlite3".to_owned();

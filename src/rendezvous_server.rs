@@ -68,12 +68,27 @@ static ALWAYS_USE_RELAY: AtomicBool = AtomicBool::new(false);
 use once_cell::sync::Lazy;
 use tokio::sync::Mutex as TokioMutex; // differentiate if needed
 #[derive(Clone)]
-struct PunchReqEntry { tm: Instant, from_ip: String, to_ip: String, to_id: String }
+struct PunchReqEntry {
+    tm: Instant,
+    from_ip: String,
+    to_ip: String,
+    to_id: String,
+}
 static PUNCH_REQS: Lazy<TokioMutex<Vec<PunchReqEntry>>> = Lazy::new(|| TokioMutex::new(Vec::new()));
 const PUNCH_REQ_DEDUPE_SEC: u64 = 60;
+const PUNCH_REQ_RETENTION_SEC: u64 = 10 * 60;
+const PUNCH_REQ_MAX_ENTRIES: usize = 10_000;
 
 fn licence_key_matches(expected: &str, actual: &str) -> bool {
     expected.as_bytes().ct_eq(actual.as_bytes()).into()
+}
+
+fn prune_punch_requests(entries: &mut Vec<PunchReqEntry>, now: Instant) {
+    entries.retain(|entry| now.duration_since(entry.tm).as_secs() <= PUNCH_REQ_RETENTION_SEC);
+    if entries.len() > PUNCH_REQ_MAX_ENTRIES {
+        let drain_len = entries.len() - PUNCH_REQ_MAX_ENTRIES;
+        entries.drain(..drain_len);
+    }
 }
 
 #[derive(Deserialize)]
@@ -223,6 +238,40 @@ mod tests {
         assert!(authorize_punch_hole_token(true, "secret", &token).is_err());
     }
 
+    #[test]
+    fn punch_request_pruning_drops_stale_entries_and_caps_size() {
+        let now = Instant::now();
+        let mut entries = vec![
+            PunchReqEntry {
+                tm: now - Duration::from_secs(PUNCH_REQ_RETENTION_SEC + 1),
+                from_ip: "old".to_owned(),
+                to_ip: "10.0.0.1".to_owned(),
+                to_id: "peer".to_owned(),
+            },
+            PunchReqEntry {
+                tm: now,
+                from_ip: "fresh".to_owned(),
+                to_ip: "10.0.0.2".to_owned(),
+                to_id: "peer".to_owned(),
+            },
+        ];
+        prune_punch_requests(&mut entries, now);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].from_ip, "fresh");
+
+        let mut entries = (0..(PUNCH_REQ_MAX_ENTRIES + 5))
+            .map(|i| PunchReqEntry {
+                tm: now,
+                from_ip: format!("from-{i}"),
+                to_ip: "10.0.0.1".to_owned(),
+                to_id: "peer".to_owned(),
+            })
+            .collect::<Vec<_>>();
+        prune_punch_requests(&mut entries, now);
+        assert_eq!(entries.len(), PUNCH_REQ_MAX_ENTRIES);
+        assert_eq!(entries[0].from_ip, "from-5");
+    }
+
     #[tokio::test]
     async fn punch_hole_request_returns_login_required_before_peer_lookup_when_enabled() {
         let old_must_login = std::env::var("MUST_LOGIN").ok();
@@ -233,7 +282,7 @@ mod tests {
         let (tx, _rx) = mpsc::unbounded_channel::<Data>();
         let mut server = RendezvousServer {
             tcp_punch: Default::default(),
-            pm: PeerMap::new().await.unwrap(),
+            pm: PeerMap::new_for_tests().await.unwrap(),
             tx,
             relay_servers: Default::default(),
             relay_servers0: Default::default(),
@@ -938,21 +987,34 @@ impl RendezvousServer {
                 });
                 return Ok((msg_out, None));
             }
-            
+
             // record punch hole request (from addr -> peer id/peer_addr)
             {
                 let from_ip = try_into_v4(addr).ip().to_string();
                 let to_ip = try_into_v4(peer_addr).ip().to_string();
                 let to_id_clone = id.clone();
                 let mut lock = PUNCH_REQS.lock().await;
+                let now = Instant::now();
+                prune_punch_requests(&mut lock, now);
                 let mut dup = false;
-                for e in lock.iter().rev().take(30) { // only check recent tail subset for speed
+                for e in lock.iter().rev().take(30) {
+                    // only check recent tail subset for speed
                     if e.from_ip == from_ip && e.to_id == to_id_clone {
-                        if e.tm.elapsed().as_secs() < PUNCH_REQ_DEDUPE_SEC { dup = true; }
+                        if e.tm.elapsed().as_secs() < PUNCH_REQ_DEDUPE_SEC {
+                            dup = true;
+                        }
                         break;
                     }
                 }
-                if !dup { lock.push(PunchReqEntry { tm: Instant::now(), from_ip, to_ip, to_id: to_id_clone }); }
+                if !dup {
+                    lock.push(PunchReqEntry {
+                        tm: now,
+                        from_ip,
+                        to_ip,
+                        to_id: to_id_clone,
+                    });
+                    prune_punch_requests(&mut lock, now);
+                }
             }
 
             let mut msg_out = RendezvousMessage::new();
