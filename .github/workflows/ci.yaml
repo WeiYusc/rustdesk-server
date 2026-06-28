@@ -38,6 +38,15 @@ jobs:
             git diff --check "${empty_tree}..HEAD"
           fi
 
+      - name: Prepare generated version file
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          {
+            printf 'pub const VERSION: &str = "%s";\n' "$version"
+            printf '#[allow(dead_code)]\n'
+            printf 'pub const BUILD_DATE: &str = "ci";\n'
+          } > src/version.rs
+
       - name: Check formatting
         run: rustfmt --edition 2021 --check src/lib.rs src/main.rs src/hbbr.rs src/utils.rs src/common.rs src/database.rs src/peer.rs src/rendezvous_server.rs src/relay_server.rs
 
