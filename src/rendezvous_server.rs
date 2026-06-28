@@ -185,6 +185,26 @@ mod tests {
     use jsonwebtoken::{encode, EncodingKey, Header};
     use serde::Serialize;
 
+    async fn test_rendezvous_server(tx: Sender) -> RendezvousServer {
+        RendezvousServer {
+            tcp_punch: Default::default(),
+            ws_map: Default::default(),
+            pm: PeerMap::new_for_tests().await.unwrap(),
+            tx,
+            relay_servers: Default::default(),
+            relay_servers0: Default::default(),
+            rendezvous_servers: Default::default(),
+            inner: Arc::new(Inner {
+                serial: 0,
+                version: String::new(),
+                software_url: String::new(),
+                mask: None,
+                local_ip: String::new(),
+                sk: None,
+            }),
+        }
+    }
+
     #[derive(Serialize)]
     struct TestClaims {
         sub: String,
@@ -216,6 +236,18 @@ mod tests {
             &EncodingKey::from_secret(secret.as_bytes()),
         )
         .unwrap()
+    }
+
+    #[tokio::test]
+    async fn rendezvous_help_does_not_advertise_unimplemented_reload_geo() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let help = server.check_cmd("h").await;
+
+        assert!(!help.contains("reload-geo(rg)"), "help output: {help}");
+        assert!(help.contains("punch-requests(pr)"), "help output: {help}");
+        assert!(help.contains("test-geo(tg)"), "help output: {help}");
     }
 
     #[test]
@@ -1667,9 +1699,8 @@ impl RendezvousServer {
         match fds.next() {
             Some("h") => {
                 res = format!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n",
                     "relay-servers(rs) <separated by ,>",
-                    "reload-geo(rg)",
                     "ip-blocker(ib) [<ip>|<number>] [-]",
                     "ip-changes(ic) [<id>|<number>] [-]",
                     "punch-requests(pr) [<number>] [-]",
