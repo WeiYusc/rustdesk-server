@@ -627,6 +627,58 @@ mod tests {
             _ => panic!("unexpected route message"),
         }
     }
+
+    #[tokio::test]
+    async fn websocket_register_peer_with_existing_pk_stores_sink_for_routing() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = RendezvousServer {
+            tcp_punch: Default::default(),
+            ws_map: Default::default(),
+            pm: PeerMap::new_for_tests().await.unwrap(),
+            tx,
+            relay_servers: Default::default(),
+            relay_servers0: Default::default(),
+            rendezvous_servers: Default::default(),
+            inner: Arc::new(Inner {
+                serial: 0,
+                version: String::new(),
+                software_url: String::new(),
+                mask: None,
+                local_ip: String::new(),
+                sk: None,
+            }),
+        };
+        let peer = server.pm.get_or("tcp-peer").await;
+        {
+            let mut peer = peer.write().await;
+            peer.pk = Bytes::from_static(b"registered-pk");
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(sink));
+        let mut request = RegisterPeer::new();
+        request.id = "tcp-peer".to_owned();
+        let mut message = RendezvousMessage::new();
+        message.set_register_peer(request);
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(
+            server
+                .handle_tcp(&bytes, &mut sink, client_addr, "", true)
+                .await
+        );
+
+        assert!(server
+            .ws_map
+            .lock()
+            .await
+            .contains_key(&try_into_v4(client_addr)));
+    }
 }
 
 #[derive(Clone)]
@@ -967,8 +1019,16 @@ impl RendezvousServer {
             match msg_in.union {
                 Some(rendezvous_message::Union::RegisterPeer(rp)) => {
                     // B registered
-                    for msg_out in self.handle_register_peer(rp, addr).await {
+                    let messages = self.handle_register_peer(rp, addr).await;
+                    let registered = messages
+                        .first()
+                        .map(|msg| !msg.register_peer_response().request_pk)
+                        .unwrap_or(false);
+                    for msg_out in messages {
                         Self::send_to_sink(sink, msg_out).await;
+                    }
+                    if ws && registered {
+                        self.store_ws_sink(addr, sink).await;
                     }
                     return true;
                 }
@@ -1045,18 +1105,7 @@ impl RendezvousServer {
                         let registered = res == register_pk_response::Result::OK;
                         Self::send_to_sink(sink, msg_out).await;
                         if ws && registered {
-                            if let Some(sink) = sink.take() {
-                                let mut ws_map = self.ws_map.lock().await;
-                                let now = Instant::now();
-                                prune_ws_map(&mut ws_map, now);
-                                ws_map.insert(
-                                    try_into_v4(addr),
-                                    WsMapEntry {
-                                        sink,
-                                        updated_at: now,
-                                    },
-                                );
-                            }
+                            self.store_ws_sink(addr, sink).await;
                         }
                     }
                     return true;
@@ -1512,6 +1561,21 @@ impl RendezvousServer {
         }
         self.tx.send(Data::Msg(msg.into(), addr))?;
         Ok(false)
+    }
+
+    async fn store_ws_sink(&mut self, addr: SocketAddr, sink: &mut Option<Sink>) {
+        if let Some(sink) = sink.take() {
+            let mut ws_map = self.ws_map.lock().await;
+            let now = Instant::now();
+            prune_ws_map(&mut ws_map, now);
+            ws_map.insert(
+                try_into_v4(addr),
+                WsMapEntry {
+                    sink,
+                    updated_at: now,
+                },
+            );
+        }
     }
 
     #[inline]
