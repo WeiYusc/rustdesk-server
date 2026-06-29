@@ -16,7 +16,7 @@ use hbb_common::{
         register_pk_response::Result::{TOO_FREQUENT, UUID_MISMATCH},
         *,
     },
-    tcp::{listen_any, FramedStream},
+    tcp::{listen_any, Encrypt, FramedStream},
     timeout,
     tokio::{
         self,
@@ -33,7 +33,7 @@ use hbb_common::{
 use ipnetwork::Ipv4Network;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::Deserialize;
-use sodiumoxide::crypto::sign;
+use sodiumoxide::crypto::{box_, secretbox, sign};
 use std::{
     collections::HashMap,
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
@@ -53,10 +53,37 @@ enum Data {
 const REG_TIMEOUT: i32 = 30_000;
 type TcpStreamSink = SplitSink<Framed<TcpStream, BytesCodec>, Bytes>;
 type WsSink = SplitSink<tokio_tungstenite::WebSocketStream<TcpStream>, tungstenite::Message>;
-enum Sink {
-    TcpStream(TcpStreamSink),
-    Ws(WsSink),
+struct SafeWsSink {
+    sink: WsSink,
+    encrypt: Option<Encrypt>,
 }
+
+struct SafeTcpStreamSink {
+    sink: TcpStreamSink,
+    encrypt: Option<Encrypt>,
+}
+
+enum Sink {
+    TcpStream(SafeTcpStreamSink),
+    Ws(SafeWsSink),
+}
+
+impl Sink {
+    fn is_encrypted(&self) -> bool {
+        match self {
+            Sink::TcpStream(sink) => sink.encrypt.is_some(),
+            Sink::Ws(sink) => sink.encrypt.is_some(),
+        }
+    }
+
+    fn set_encrypt_key(&mut self, key: secretbox::Key) {
+        match self {
+            Sink::TcpStream(sink) => sink.encrypt = Some(Encrypt::new(key)),
+            Sink::Ws(sink) => sink.encrypt = Some(Encrypt::new(key)),
+        }
+    }
+}
+
 struct WsMapEntry {
     sink: Sink,
     updated_at: Instant,
@@ -87,6 +114,31 @@ const WS_MAP_MAX_ENTRIES: usize = 10_000;
 
 fn licence_key_matches(expected: &str, actual: &str) -> bool {
     expected.as_bytes().ct_eq(actual.as_bytes()).into()
+}
+
+fn build_key_exchange_phase1(
+    public_key: &box_::PublicKey,
+    signing_key: &Option<sign::SecretKey>,
+) -> Option<RendezvousMessage> {
+    let signing_key = signing_key.as_ref()?;
+    let mut msg_out = RendezvousMessage::new();
+    msg_out.set_key_exchange(KeyExchange {
+        keys: vec![Bytes::from(sign::sign(&public_key.0, signing_key))],
+        ..Default::default()
+    });
+    Some(msg_out)
+}
+
+fn decode_tcp_key_exchange(
+    peer_public_key: &[u8],
+    encrypted_key: &[u8],
+    server_secret_key: &box_::SecretKey,
+) -> ResultType<secretbox::Key> {
+    Encrypt::decode(encrypted_key, peer_public_key, server_secret_key)
+}
+
+fn requires_tcp_key_exchange(key: &str, sink: &Option<Sink>) -> bool {
+    !key.is_empty() && !sink.as_ref().map(|sink| sink.is_encrypted()).unwrap_or(false)
 }
 
 fn prune_punch_requests(entries: &mut Vec<PunchReqEntry>, now: Instant) {
@@ -201,6 +253,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         }
     }
@@ -385,6 +439,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
 
@@ -434,6 +490,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
 
@@ -462,6 +520,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
         let mut request = RegisterPeer::new();
@@ -505,6 +565,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
         let mut request = RegisterPk::new();
@@ -536,6 +598,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
         let mut request = RegisterPk::new();
@@ -572,6 +636,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
         let peer = server.pm.get_or("tcp-peer").await;
@@ -610,6 +676,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
         let peer = server.pm.get_or("tcp-peer").await;
@@ -644,6 +712,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
         let addr = "127.0.0.1:40006".parse().unwrap();
@@ -678,6 +748,8 @@ mod tests {
                 mask: None,
                 local_ip: String::new(),
                 sk: None,
+                secure_tcp_pk_b: box_::PublicKey([0; box_::PUBLICKEYBYTES]),
+                secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         };
         let peer = server.pm.get_or("tcp-peer").await;
@@ -692,7 +764,10 @@ mod tests {
         let client_addr = client.local_addr().unwrap();
         let (server_stream, _) = listener.accept().await.unwrap();
         let (sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
-        let mut sink = Some(Sink::TcpStream(sink));
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink,
+            encrypt: None,
+        }));
         let mut request = RegisterPeer::new();
         request.id = "tcp-peer".to_owned();
         let mut message = RendezvousMessage::new();
@@ -711,6 +786,130 @@ mod tests {
             .await
             .contains_key(&try_into_v4(client_addr)));
     }
+
+    #[test]
+    fn tcp_key_exchange_phase1_signs_ephemeral_public_key() {
+        let (sign_pk, sign_sk) = sign::gen_keypair();
+        let (box_pk, _) = box_::gen_keypair();
+
+        let message = build_key_exchange_phase1(&box_pk, &Some(sign_sk)).unwrap();
+
+        let exchange = message.key_exchange();
+        assert_eq!(exchange.keys.len(), 1);
+        let opened = sign::verify(&exchange.keys[0], &sign_pk).unwrap();
+        assert_eq!(opened, box_pk.0);
+    }
+
+    #[test]
+    fn tcp_key_exchange_phase2_decodes_symmetric_key() {
+        let (server_pk, server_sk) = box_::gen_keypair();
+        let (client_pk, client_sk) = box_::gen_keypair();
+        let symmetric_key = secretbox::gen_key();
+        let nonce = box_::Nonce([0u8; box_::NONCEBYTES]);
+        let encrypted_key = box_::seal(&symmetric_key.0, &nonce, &server_pk, &client_sk);
+
+        let decoded = decode_tcp_key_exchange(&client_pk.0, &encrypted_key, &server_sk).unwrap();
+
+        assert_eq!(decoded.0, symmetric_key.0);
+    }
+
+    #[tokio::test]
+    async fn encrypted_tcp_rejects_plaintext_before_key_exchange() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink,
+            encrypt: None,
+        }));
+        let mut request = RegisterPeer::new();
+        request.id = "tcp-peer".to_owned();
+        let mut message = RendezvousMessage::new();
+        message.set_register_peer(request);
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(!server
+            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+            .await);
+    }
+
+    #[tokio::test]
+    async fn plaintext_tcp_still_accepts_register_peer_when_key_is_empty() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink,
+            encrypt: None,
+        }));
+        let mut request = RegisterPeer::new();
+        request.id = "tcp-peer".to_owned();
+        let mut message = RendezvousMessage::new();
+        message.set_register_peer(request);
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(server
+            .handle_tcp(&bytes, &mut sink, client_addr, "", false)
+            .await);
+    }
+
+    #[tokio::test]
+    async fn encrypted_tcp_rejects_duplicate_key_exchange() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (tcp_sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink: tcp_sink,
+            encrypt: Some(Encrypt::new(secretbox::gen_key())),
+        }));
+        let mut message = RendezvousMessage::new();
+        message.set_key_exchange(KeyExchange {
+            keys: vec![Bytes::from_static(b"ignored"), Bytes::from_static(b"ignored")],
+            ..Default::default()
+        });
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(!server
+            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+            .await);
+    }
+
+    #[tokio::test]
+    async fn key_exchange_phase1_fails_closed_without_signing_key() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (tcp_sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink: tcp_sink,
+            encrypt: None,
+        }));
+
+        assert!(!server.key_exchange_phase1(client_addr, &mut sink).await);
+    }
 }
 
 #[derive(Clone)]
@@ -721,6 +920,8 @@ struct Inner {
     mask: Option<Ipv4Network>,
     local_ip: String,
     sk: Option<sign::SecretKey>,
+    secure_tcp_pk_b: box_::PublicKey,
+    secure_tcp_sk_b: box_::SecretKey,
 }
 
 #[derive(Clone)]
@@ -765,6 +966,7 @@ impl RendezvousServer {
             log::info!("software_url: {}, version: {}", software_url, version);
         }
         let mask = get_arg("mask").parse().ok();
+        let (secure_tcp_pk_b, secure_tcp_sk_b) = box_::gen_keypair();
         let local_ip = if mask.is_none() {
             "".to_owned()
         } else {
@@ -788,6 +990,8 @@ impl RendezvousServer {
                 version,
                 software_url,
                 sk,
+                secure_tcp_pk_b,
+                secure_tcp_sk_b,
                 mask,
                 local_ip,
             }),
@@ -1048,6 +1252,12 @@ impl RendezvousServer {
         ws: bool,
     ) -> bool {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(bytes) {
+            if requires_tcp_key_exchange(key, sink)
+                && !matches!(msg_in.union, Some(rendezvous_message::Union::KeyExchange(_)))
+            {
+                log::warn!("Rejecting unencrypted TCP/WS message from {addr} before key exchange");
+                return false;
+            }
             match msg_in.union {
                 Some(rendezvous_message::Union::RegisterPeer(rp)) => {
                     // B registered
@@ -1141,6 +1351,32 @@ impl RendezvousServer {
                         }
                     }
                     return true;
+                }
+                Some(rendezvous_message::Union::KeyExchange(exchange)) => {
+                    if sink.as_ref().map(|sink| sink.is_encrypted()).unwrap_or(false) {
+                        log::warn!("Rejecting duplicate key exchange from {addr}");
+                        return false;
+                    }
+                    if exchange.keys.len() != 2 {
+                        log::error!("Handshake failed from {addr}: invalid phase 2 key exchange message");
+                        return false;
+                    }
+                    match decode_tcp_key_exchange(
+                        &exchange.keys[0],
+                        &exchange.keys[1],
+                        &self.inner.secure_tcp_sk_b,
+                    ) {
+                        Ok(key) => {
+                            if let Some(sink) = sink.as_mut() {
+                                sink.set_encrypt_key(key);
+                            }
+                            return true;
+                        }
+                        Err(err) => {
+                            log::error!("Handshake failed from {addr}: {err}");
+                            return false;
+                        }
+                    }
                 }
                 _ => {}
             }
@@ -1545,13 +1781,19 @@ impl RendezvousServer {
 
     #[inline]
     async fn try_send_to_sink(sink: &mut Sink, msg: RendezvousMessage) -> ResultType<()> {
-        let bytes = msg.write_to_bytes()?;
+        let mut bytes = msg.write_to_bytes()?;
         match sink {
             Sink::TcpStream(s) => {
-                s.send(Bytes::from(bytes)).await?;
+                if let Some(key) = s.encrypt.as_mut() {
+                    bytes = key.enc(&bytes);
+                }
+                s.sink.send(Bytes::from(bytes)).await?;
             }
             Sink::Ws(ws) => {
-                ws.send(tungstenite::Message::Binary(bytes)).await?;
+                if let Some(key) = ws.encrypt.as_mut() {
+                    bytes = key.enc(&bytes);
+                }
+                ws.sink.send(tungstenite::Message::Binary(bytes)).await?;
             }
         }
         Ok(())
@@ -1810,7 +2052,7 @@ impl RendezvousServer {
                 if let Some("-") = arg {
                     lock.clear();
                 } else {
-                    let mut start = arg.and_then(|x| x.parse::<usize>().ok()).unwrap_or(0);
+                    let start = arg.and_then(|x| x.parse::<usize>().ok()).unwrap_or(0);
                     let mut page_size = fds
                         .next()
                         .and_then(|x| x.parse::<usize>().ok())
@@ -1936,9 +2178,24 @@ impl RendezvousServer {
             };
             let ws_stream = tokio_tungstenite::accept_hdr_async(stream, callback).await?;
             let (a, mut b) = ws_stream.split();
-            sink = Some(Sink::Ws(a));
+            sink = Some(Sink::Ws(SafeWsSink {
+                sink: a,
+                encrypt: None,
+            }));
+            if !key.is_empty() && !self.key_exchange_phase1(addr, &mut sink).await {
+                return Ok(());
+            }
             while let Ok(Some(Ok(msg))) = timeout(30_000, b.next()).await {
                 if let tungstenite::Message::Binary(bytes) = msg {
+                    let mut bytes = BytesMut::from(bytes.as_slice());
+                    if let Some(Sink::Ws(s)) = sink.as_mut() {
+                        if let Some(key) = s.encrypt.as_mut() {
+                            if let Err(err) = key.dec(&mut bytes) {
+                                log::error!("dec ws data from {:?} err: {:?}", addr, err);
+                                break;
+                            }
+                        }
+                    }
                     if !self.handle_tcp(&bytes, &mut sink, addr, key, ws).await {
                         break;
                     }
@@ -1946,8 +2203,22 @@ impl RendezvousServer {
             }
         } else {
             let (a, mut b) = Framed::new(stream, BytesCodec::new()).split();
-            sink = Some(Sink::TcpStream(a));
-            while let Ok(Some(Ok(bytes))) = timeout(30_000, b.next()).await {
+            sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+                sink: a,
+                encrypt: None,
+            }));
+            if !key.is_empty() && !self.key_exchange_phase1(addr, &mut sink).await {
+                return Ok(());
+            }
+            while let Ok(Some(Ok(mut bytes))) = timeout(30_000, b.next()).await {
+                if let Some(Sink::TcpStream(s)) = sink.as_mut() {
+                    if let Some(key) = s.encrypt.as_mut() {
+                        if let Err(err) = key.dec(&mut bytes) {
+                            log::error!("dec tcp data from {:?} err: {:?}", addr, err);
+                            break;
+                        }
+                    }
+                }
                 if !self.handle_tcp(&bytes, &mut sink, addr, key, ws).await {
                     break;
                 }
@@ -2011,6 +2282,18 @@ impl RendezvousServer {
             log::info!("Key: {}", key);
         }
         (key, out_sk)
+    }
+
+    #[inline]
+    async fn key_exchange_phase1(&mut self, addr: SocketAddr, sink: &mut Option<Sink>) -> bool {
+        if let Some(message) = build_key_exchange_phase1(&self.inner.secure_tcp_pk_b, &self.inner.sk) {
+            log::debug!("KeyExchange phase 1 sent to {addr}");
+            Self::send_to_sink(sink, message).await;
+            true
+        } else {
+            log::error!("Cannot start encrypted TCP/WS key exchange for {addr}: missing server signing key");
+            false
+        }
     }
 
     #[inline]
