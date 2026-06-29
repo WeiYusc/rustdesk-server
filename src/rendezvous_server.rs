@@ -893,6 +893,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn encrypted_tcp_rejects_phase2_with_invalid_peer_public_key() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (tcp_sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink: tcp_sink,
+            encrypt: None,
+        }));
+        let mut message = RendezvousMessage::new();
+        message.set_key_exchange(KeyExchange {
+            keys: vec![Bytes::from_static(b"short"), Bytes::from_static(b"ciphertext")],
+            ..Default::default()
+        });
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(!server
+            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+            .await);
+        assert!(sink.as_ref().map(|sink| !sink.is_encrypted()).unwrap_or(false));
+    }
+
+    #[tokio::test]
+    async fn encrypted_tcp_rejects_phase2_with_invalid_encrypted_key() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (tcp_sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink: tcp_sink,
+            encrypt: None,
+        }));
+        let (client_pk, _) = box_::gen_keypair();
+        let mut message = RendezvousMessage::new();
+        message.set_key_exchange(KeyExchange {
+            keys: vec![Bytes::from(client_pk.0.to_vec()), Bytes::from_static(b"bad")],
+            ..Default::default()
+        });
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(!server
+            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+            .await);
+        assert!(sink.as_ref().map(|sink| !sink.is_encrypted()).unwrap_or(false));
+    }
+
+    #[tokio::test]
     async fn key_exchange_phase1_fails_closed_without_signing_key() {
         let (tx, _rx) = mpsc::unbounded_channel::<Data>();
         let mut server = test_rendezvous_server(tx).await;
