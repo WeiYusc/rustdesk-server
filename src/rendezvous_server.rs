@@ -234,6 +234,7 @@ fn login_required_response() -> RendezvousMessage {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use hbb_common::futures_util::FutureExt;
     use jsonwebtoken::{encode, EncodingKey, Header};
     use serde::Serialize;
 
@@ -257,6 +258,33 @@ mod tests {
                 secure_tcp_sk_b: box_::SecretKey([0; box_::SECRETKEYBYTES]),
             }),
         }
+    }
+
+    async fn test_rendezvous_server_with_signing_key(tx: Sender) -> (RendezvousServer, sign::PublicKey) {
+        let (sign_pk, sign_sk) = sign::gen_keypair();
+        let (secure_tcp_pk_b, secure_tcp_sk_b) = box_::gen_keypair();
+        (
+            RendezvousServer {
+                tcp_punch: Default::default(),
+                ws_map: Default::default(),
+                pm: PeerMap::new_for_tests().await.unwrap(),
+                tx,
+                relay_servers: Default::default(),
+                relay_servers0: Default::default(),
+                rendezvous_servers: Default::default(),
+                inner: Arc::new(Inner {
+                    serial: 0,
+                    version: String::new(),
+                    software_url: String::new(),
+                    mask: None,
+                    local_ip: String::new(),
+                    sk: Some(sign_sk),
+                    secure_tcp_pk_b,
+                    secure_tcp_sk_b,
+                }),
+            },
+            sign_pk,
+        )
     }
 
     #[derive(Serialize)]
@@ -863,6 +891,92 @@ mod tests {
         assert!(server
             .handle_tcp(&bytes, &mut sink, client_addr, "", false)
             .await);
+    }
+
+    #[tokio::test]
+    async fn encrypted_websocket_completes_key_exchange_and_accepts_encrypted_register_peer() {
+        timeout(
+            2_000,
+            encrypted_websocket_completes_key_exchange_and_accepts_encrypted_register_peer_inner(),
+        )
+        .await
+        .unwrap();
+    }
+
+    async fn encrypted_websocket_completes_key_exchange_and_accepts_encrypted_register_peer_inner() {
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let (mut server, sign_pk) = test_rendezvous_server_with_signing_key(tx).await;
+        let peer = server.pm.get_or("ws-peer").await;
+        {
+            let mut peer = peer.write().await;
+            peer.pk = Bytes::from_static(b"registered-pk");
+        }
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let listener_addr = listener.local_addr().unwrap();
+        let client = TcpStream::connect(listener_addr).await.unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let ws_map = server.ws_map.clone();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let server_task = tokio::spawn(async move {
+            server
+                .handle_listener_inner(server_stream, client_addr, "server-key", true)
+                .await
+        });
+        let (mut ws_client, _) = tokio_tungstenite::client_async(
+            format!("ws://{listener_addr}/"),
+            client,
+        )
+        .await
+        .unwrap();
+
+        let phase1 = match ws_client.next().await.unwrap().unwrap() {
+            tungstenite::Message::Binary(bytes) => RendezvousMessage::parse_from_bytes(&bytes).unwrap(),
+            other => panic!("unexpected websocket message: {other:?}"),
+        };
+        let server_pk_bytes = sign::verify(&phase1.key_exchange().keys[0], &sign_pk).unwrap();
+        let server_pk = box_::PublicKey::from_slice(&server_pk_bytes).unwrap();
+        let (client_pk, client_sk) = box_::gen_keypair();
+        let symmetric_key = secretbox::gen_key();
+        let nonce = box_::Nonce([0u8; box_::NONCEBYTES]);
+        let mut phase2 = RendezvousMessage::new();
+        phase2.set_key_exchange(KeyExchange {
+            keys: vec![
+                Bytes::from(client_pk.0.to_vec()),
+                Bytes::from(box_::seal(&symmetric_key.0, &nonce, &server_pk, &client_sk)),
+            ],
+            ..Default::default()
+        });
+        ws_client
+            .send(tungstenite::Message::Binary(phase2.write_to_bytes().unwrap()))
+            .await
+            .unwrap();
+
+        let mut request = RegisterPeer::new();
+        request.id = "ws-peer".to_owned();
+        let mut register = RendezvousMessage::new();
+        register.set_register_peer(request);
+        let mut encrypt = Encrypt::new(symmetric_key);
+        ws_client
+            .send(tungstenite::Message::Binary(encrypt.enc(&register.write_to_bytes().unwrap())))
+            .await
+            .unwrap();
+        drop(ws_client);
+
+        timeout(
+            1_000,
+            async {
+                loop {
+                    if server_task.is_finished() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            },
+        )
+        .await
+        .unwrap();
+        assert!(server_task.now_or_never().unwrap().unwrap().is_ok());
+        assert!(ws_map.lock().await.contains_key(&try_into_v4(client_addr)));
     }
 
     #[tokio::test]
