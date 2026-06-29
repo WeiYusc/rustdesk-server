@@ -1,6 +1,8 @@
 #!/command/with-contenv sh
 set -eu
 
-mkdir -p /app/data /app/runtime
+mkdir -p /app/data/upload /app/runtime /app/resources/public
+rm -rf /app/resources/public/upload
+ln -s /app/data/upload /app/resources/public/upload
 cd /app
 exec /app/apimain -c /app/conf/config.yaml
