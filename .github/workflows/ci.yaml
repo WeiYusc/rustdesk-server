@@ -4,11 +4,7 @@ permissions:
   contents: read
 
 on:
-  pull_request:
-  push:
-    branches:
-      - master
-      - main
+  workflow_dispatch:
 
 jobs:
   rust:
