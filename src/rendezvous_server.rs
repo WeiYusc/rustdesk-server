@@ -1018,6 +1018,41 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn tcp_listener_sends_phase1_by_default_when_server_key_is_configured() {
+        let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
+        std::env::remove_var("ENCRYPTED_ONLY");
+
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let (mut server, sign_pk) = test_rendezvous_server_with_signing_key(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let server_task = tokio::spawn(async move {
+            server
+                .handle_listener_inner(server_stream, client_addr, "server-key", false)
+                .await
+        });
+        let (_client_sink, mut stream) = Framed::new(client, BytesCodec::new()).split();
+
+        let bytes = timeout(5_000, stream.next())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        let phase1 = RendezvousMessage::parse_from_bytes(&bytes).unwrap();
+        let exchange = phase1.key_exchange();
+        assert_eq!(exchange.keys.len(), 1);
+        assert!(sign::verify(&exchange.keys[0], &sign_pk).is_ok());
+        drop(stream);
+        drop(_client_sink);
+        assert!(timeout(1_000, server_task).await.unwrap().unwrap().is_ok());
+    }
+
+    #[tokio::test]
     async fn plaintext_tcp_accepts_register_peer_with_server_key_when_exchange_not_required() {
         let _guard = TcpKeyExchangeEnvGuard::lock().await;
         std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
@@ -2588,10 +2623,7 @@ impl RendezvousServer {
                 sink: a,
                 encrypt: None,
             }));
-            if require_tcp_key_exchange_enabled()
-                && !key.is_empty()
-                && !self.key_exchange_phase1(addr, &mut sink).await
-            {
+            if !key.is_empty() && !self.key_exchange_phase1(addr, &mut sink).await {
                 return Ok(());
             }
             while let Ok(Some(Ok(msg))) = timeout(30_000, b.next()).await {
@@ -2616,10 +2648,7 @@ impl RendezvousServer {
                 sink: a,
                 encrypt: None,
             }));
-            if require_tcp_key_exchange_enabled()
-                && !key.is_empty()
-                && !self.key_exchange_phase1(addr, &mut sink).await
-            {
+            if !key.is_empty() && !self.key_exchange_phase1(addr, &mut sink).await {
                 return Ok(());
             }
             while let Ok(Some(Ok(mut bytes))) = timeout(30_000, b.next()).await {
