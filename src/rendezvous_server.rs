@@ -141,8 +141,24 @@ fn decode_tcp_key_exchange(
     Encrypt::decode(encrypted_key, peer_public_key, server_secret_key)
 }
 
+fn env_flag_enabled(name: &str) -> bool {
+    std::env::var(name)
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "y" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
+}
+
+fn require_tcp_key_exchange_enabled() -> bool {
+    env_flag_enabled("REQUIRE_TCP_KEY_EXCHANGE") || env_flag_enabled("ENCRYPTED_ONLY")
+}
+
 fn requires_tcp_key_exchange(key: &str, sink: &Option<Sink>) -> bool {
-    !key.is_empty()
+    require_tcp_key_exchange_enabled()
+        && !key.is_empty()
         && !sink
             .as_ref()
             .map(|sink| sink.is_encrypted())
@@ -255,6 +271,14 @@ mod tests {
 
     static MUST_LOGIN_TEST_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new(()));
 
+    fn restore_env(key: &str, value: &Option<String>) {
+        if let Some(value) = value {
+            std::env::set_var(key, value);
+        } else {
+            std::env::remove_var(key);
+        }
+    }
+
     struct MustLoginTestGuard {
         _guard: TokioMutexGuard<'static, ()>,
         old_must_login: Option<String>,
@@ -276,17 +300,38 @@ mod tests {
 
     impl Drop for MustLoginTestGuard {
         fn drop(&mut self) {
+            restore_env("MUST_LOGIN", &self.old_must_login);
+            restore_env("RUSTDESK_API_JWT_KEY", &self.old_jwt_key);
             MUST_LOGIN_RUNTIME.store(self.old_runtime, Ordering::SeqCst);
-            if let Some(value) = &self.old_must_login {
-                std::env::set_var("MUST_LOGIN", value);
-            } else {
-                std::env::remove_var("MUST_LOGIN");
+        }
+    }
+
+    static TCP_KEY_EXCHANGE_TEST_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new(()));
+
+    struct TcpKeyExchangeEnvGuard {
+        _guard: TokioMutexGuard<'static, ()>,
+        old_require_tcp_key_exchange: Option<String>,
+        old_encrypted_only: Option<String>,
+    }
+
+    impl TcpKeyExchangeEnvGuard {
+        async fn lock() -> Self {
+            let guard = TCP_KEY_EXCHANGE_TEST_LOCK.lock().await;
+            Self {
+                _guard: guard,
+                old_require_tcp_key_exchange: std::env::var("REQUIRE_TCP_KEY_EXCHANGE").ok(),
+                old_encrypted_only: std::env::var("ENCRYPTED_ONLY").ok(),
             }
-            if let Some(value) = &self.old_jwt_key {
-                std::env::set_var("RUSTDESK_API_JWT_KEY", value);
-            } else {
-                std::env::remove_var("RUSTDESK_API_JWT_KEY");
-            }
+        }
+    }
+
+    impl Drop for TcpKeyExchangeEnvGuard {
+        fn drop(&mut self) {
+            restore_env(
+                "REQUIRE_TCP_KEY_EXCHANGE",
+                &self.old_require_tcp_key_exchange,
+            );
+            restore_env("ENCRYPTED_ONLY", &self.old_encrypted_only);
         }
     }
 
@@ -910,6 +955,10 @@ mod tests {
 
     #[tokio::test]
     async fn encrypted_tcp_rejects_plaintext_before_key_exchange() {
+        let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        std::env::set_var("REQUIRE_TCP_KEY_EXCHANGE", "1");
+        std::env::remove_var("ENCRYPTED_ONLY");
+
         let (tx, _rx) = mpsc::unbounded_channel::<Data>();
         let mut server = test_rendezvous_server(tx).await;
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -931,6 +980,70 @@ mod tests {
 
         assert!(
             !server
+                .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn encrypted_only_rejects_plaintext_before_key_exchange() {
+        let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
+        std::env::set_var("ENCRYPTED_ONLY", "1");
+
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink,
+            encrypt: None,
+        }));
+        let mut request = RegisterPeer::new();
+        request.id = "tcp-peer".to_owned();
+        let mut message = RendezvousMessage::new();
+        message.set_register_peer(request);
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(
+            !server
+                .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+                .await
+        );
+    }
+
+    #[tokio::test]
+    async fn plaintext_tcp_accepts_register_peer_with_server_key_when_exchange_not_required() {
+        let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
+        std::env::remove_var("ENCRYPTED_ONLY");
+
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let mut server = test_rendezvous_server(tx).await;
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let client = TcpStream::connect(listener.local_addr().unwrap())
+            .await
+            .unwrap();
+        let client_addr = client.local_addr().unwrap();
+        let (server_stream, _) = listener.accept().await.unwrap();
+        let (sink, _stream) = Framed::new(server_stream, BytesCodec::new()).split();
+        let mut sink = Some(Sink::TcpStream(SafeTcpStreamSink {
+            sink,
+            encrypt: None,
+        }));
+        let mut request = RegisterPeer::new();
+        request.id = "tcp-peer".to_owned();
+        let mut message = RendezvousMessage::new();
+        message.set_register_peer(request);
+        let bytes = message.write_to_bytes().unwrap();
+
+        assert!(
+            server
                 .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
                 .await
         );
@@ -976,6 +1089,10 @@ mod tests {
 
     async fn encrypted_websocket_completes_key_exchange_and_accepts_encrypted_register_peer_inner()
     {
+        let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        std::env::set_var("REQUIRE_TCP_KEY_EXCHANGE", "1");
+        std::env::remove_var("ENCRYPTED_ONLY");
+
         let (tx, _rx) = mpsc::unbounded_channel::<Data>();
         let (mut server, sign_pk) = test_rendezvous_server_with_signing_key(tx).await;
         let peer = server.pm.get_or("ws-peer").await;
@@ -2471,7 +2588,10 @@ impl RendezvousServer {
                 sink: a,
                 encrypt: None,
             }));
-            if !key.is_empty() && !self.key_exchange_phase1(addr, &mut sink).await {
+            if require_tcp_key_exchange_enabled()
+                && !key.is_empty()
+                && !self.key_exchange_phase1(addr, &mut sink).await
+            {
                 return Ok(());
             }
             while let Ok(Some(Ok(msg))) = timeout(30_000, b.next()).await {
@@ -2496,7 +2616,10 @@ impl RendezvousServer {
                 sink: a,
                 encrypt: None,
             }));
-            if !key.is_empty() && !self.key_exchange_phase1(addr, &mut sink).await {
+            if require_tcp_key_exchange_enabled()
+                && !key.is_empty()
+                && !self.key_exchange_phase1(addr, &mut sink).await
+            {
                 return Ok(());
             }
             while let Ok(Some(Ok(mut bytes))) = timeout(30_000, b.next()).await {
