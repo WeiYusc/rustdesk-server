@@ -94,6 +94,10 @@ static ROTATION_RELAY_SERVER: AtomicUsize = AtomicUsize::new(0);
 type RelayServers = Vec<String>;
 const CHECK_RELAY_TIMEOUT: u64 = 3_000;
 static ALWAYS_USE_RELAY: AtomicBool = AtomicBool::new(false);
+const MUST_LOGIN_RUNTIME_INHERIT: usize = 0;
+const MUST_LOGIN_RUNTIME_DISABLED: usize = 1;
+const MUST_LOGIN_RUNTIME_ENABLED: usize = 2;
+static MUST_LOGIN_RUNTIME: AtomicUsize = AtomicUsize::new(MUST_LOGIN_RUNTIME_INHERIT);
 
 // Store punch hole requests
 use once_cell::sync::Lazy;
@@ -138,7 +142,11 @@ fn decode_tcp_key_exchange(
 }
 
 fn requires_tcp_key_exchange(key: &str, sink: &Option<Sink>) -> bool {
-    !key.is_empty() && !sink.as_ref().map(|sink| sink.is_encrypted()).unwrap_or(false)
+    !key.is_empty()
+        && !sink
+            .as_ref()
+            .map(|sink| sink.is_encrypted())
+            .unwrap_or(false)
 }
 
 fn prune_punch_requests(entries: &mut Vec<PunchReqEntry>, now: Instant) {
@@ -182,6 +190,11 @@ struct LoginClaims {
 }
 
 fn must_login_enabled() -> bool {
+    match MUST_LOGIN_RUNTIME.load(Ordering::SeqCst) {
+        MUST_LOGIN_RUNTIME_DISABLED => return false,
+        MUST_LOGIN_RUNTIME_ENABLED => return true,
+        _ => {}
+    }
     std::env::var("MUST_LOGIN")
         .map(|value| {
             matches!(
@@ -235,8 +248,47 @@ fn login_required_response() -> RendezvousMessage {
 mod tests {
     use super::*;
     use hbb_common::futures_util::FutureExt;
+    use hbb_common::tokio::sync::MutexGuard as TokioMutexGuard;
     use jsonwebtoken::{encode, EncodingKey, Header};
+    use once_cell::sync::Lazy;
     use serde::Serialize;
+
+    static MUST_LOGIN_TEST_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new(()));
+
+    struct MustLoginTestGuard {
+        _guard: TokioMutexGuard<'static, ()>,
+        old_must_login: Option<String>,
+        old_jwt_key: Option<String>,
+        old_runtime: usize,
+    }
+
+    impl MustLoginTestGuard {
+        async fn lock() -> Self {
+            let guard = MUST_LOGIN_TEST_LOCK.lock().await;
+            Self {
+                _guard: guard,
+                old_must_login: std::env::var("MUST_LOGIN").ok(),
+                old_jwt_key: std::env::var("RUSTDESK_API_JWT_KEY").ok(),
+                old_runtime: MUST_LOGIN_RUNTIME.load(Ordering::SeqCst),
+            }
+        }
+    }
+
+    impl Drop for MustLoginTestGuard {
+        fn drop(&mut self) {
+            MUST_LOGIN_RUNTIME.store(self.old_runtime, Ordering::SeqCst);
+            if let Some(value) = &self.old_must_login {
+                std::env::set_var("MUST_LOGIN", value);
+            } else {
+                std::env::remove_var("MUST_LOGIN");
+            }
+            if let Some(value) = &self.old_jwt_key {
+                std::env::set_var("RUSTDESK_API_JWT_KEY", value);
+            } else {
+                std::env::remove_var("RUSTDESK_API_JWT_KEY");
+            }
+        }
+    }
 
     async fn test_rendezvous_server(tx: Sender) -> RendezvousServer {
         RendezvousServer {
@@ -260,7 +312,9 @@ mod tests {
         }
     }
 
-    async fn test_rendezvous_server_with_signing_key(tx: Sender) -> (RendezvousServer, sign::PublicKey) {
+    async fn test_rendezvous_server_with_signing_key(
+        tx: Sender,
+    ) -> (RendezvousServer, sign::PublicKey) {
         let (sign_pk, sign_sk) = sign::gen_keypair();
         let (secure_tcp_pk_b, secure_tcp_sk_b) = box_::gen_keypair();
         (
@@ -330,6 +384,30 @@ mod tests {
         assert!(!help.contains("reload-geo(rg)"), "help output: {help}");
         assert!(help.contains("punch-requests(pr)"), "help output: {help}");
         assert!(help.contains("test-geo(tg)"), "help output: {help}");
+    }
+
+    #[tokio::test]
+    async fn rendezvous_must_login_command_queries_and_toggles_runtime_state() {
+        let _guard = MustLoginTestGuard::lock().await;
+        MUST_LOGIN_RUNTIME.store(MUST_LOGIN_RUNTIME_INHERIT, Ordering::SeqCst);
+        std::env::remove_var("MUST_LOGIN");
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let help = server.check_cmd("h").await;
+        assert!(help.contains("must-login(ml) [Y|N]"), "help output: {help}");
+        assert!(server
+            .check_cmd("must-login")
+            .await
+            .contains("MUST_LOGIN: false"));
+
+        assert!(server
+            .check_cmd("must-login Y")
+            .await
+            .contains("MUST_LOGIN: true"));
+        assert!(must_login_enabled());
+        assert!(server.check_cmd("ml N").await.contains("MUST_LOGIN: false"));
+        assert!(!must_login_enabled());
     }
 
     #[test]
@@ -446,8 +524,8 @@ mod tests {
 
     #[tokio::test]
     async fn punch_hole_request_returns_login_required_before_peer_lookup_when_enabled() {
-        let old_must_login = std::env::var("MUST_LOGIN").ok();
-        let old_jwt_key = std::env::var("RUSTDESK_API_JWT_KEY").ok();
+        let _guard = MustLoginTestGuard::lock().await;
+        MUST_LOGIN_RUNTIME.store(MUST_LOGIN_RUNTIME_INHERIT, Ordering::SeqCst);
         std::env::set_var("MUST_LOGIN", "1");
         std::env::set_var("RUSTDESK_API_JWT_KEY", "secret");
 
@@ -479,17 +557,6 @@ mod tests {
             .handle_punch_hole_request("127.0.0.1:40000".parse().unwrap(), request, "", false)
             .await
             .unwrap();
-
-        if let Some(value) = old_must_login {
-            std::env::set_var("MUST_LOGIN", value);
-        } else {
-            std::env::remove_var("MUST_LOGIN");
-        }
-        if let Some(value) = old_jwt_key {
-            std::env::set_var("RUSTDESK_API_JWT_KEY", value);
-        } else {
-            std::env::remove_var("RUSTDESK_API_JWT_KEY");
-        }
 
         assert!(to_addr.is_none());
         let response = message.punch_hole_response();
@@ -862,9 +929,11 @@ mod tests {
         message.set_register_peer(request);
         let bytes = message.write_to_bytes().unwrap();
 
-        assert!(!server
-            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
-            .await);
+        assert!(
+            !server
+                .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -888,9 +957,11 @@ mod tests {
         message.set_register_peer(request);
         let bytes = message.write_to_bytes().unwrap();
 
-        assert!(server
-            .handle_tcp(&bytes, &mut sink, client_addr, "", false)
-            .await);
+        assert!(
+            server
+                .handle_tcp(&bytes, &mut sink, client_addr, "", false)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -903,7 +974,8 @@ mod tests {
         .unwrap();
     }
 
-    async fn encrypted_websocket_completes_key_exchange_and_accepts_encrypted_register_peer_inner() {
+    async fn encrypted_websocket_completes_key_exchange_and_accepts_encrypted_register_peer_inner()
+    {
         let (tx, _rx) = mpsc::unbounded_channel::<Data>();
         let (mut server, sign_pk) = test_rendezvous_server_with_signing_key(tx).await;
         let peer = server.pm.get_or("ws-peer").await;
@@ -922,15 +994,15 @@ mod tests {
                 .handle_listener_inner(server_stream, client_addr, "server-key", true)
                 .await
         });
-        let (mut ws_client, _) = tokio_tungstenite::client_async(
-            format!("ws://{listener_addr}/"),
-            client,
-        )
-        .await
-        .unwrap();
+        let (mut ws_client, _) =
+            tokio_tungstenite::client_async(format!("ws://{listener_addr}/"), client)
+                .await
+                .unwrap();
 
         let phase1 = match ws_client.next().await.unwrap().unwrap() {
-            tungstenite::Message::Binary(bytes) => RendezvousMessage::parse_from_bytes(&bytes).unwrap(),
+            tungstenite::Message::Binary(bytes) => {
+                RendezvousMessage::parse_from_bytes(&bytes).unwrap()
+            }
             other => panic!("unexpected websocket message: {other:?}"),
         };
         let server_pk_bytes = sign::verify(&phase1.key_exchange().keys[0], &sign_pk).unwrap();
@@ -947,7 +1019,9 @@ mod tests {
             ..Default::default()
         });
         ws_client
-            .send(tungstenite::Message::Binary(phase2.write_to_bytes().unwrap()))
+            .send(tungstenite::Message::Binary(
+                phase2.write_to_bytes().unwrap(),
+            ))
             .await
             .unwrap();
 
@@ -957,22 +1031,21 @@ mod tests {
         register.set_register_peer(request);
         let mut encrypt = Encrypt::new(symmetric_key);
         ws_client
-            .send(tungstenite::Message::Binary(encrypt.enc(&register.write_to_bytes().unwrap())))
+            .send(tungstenite::Message::Binary(
+                encrypt.enc(&register.write_to_bytes().unwrap()),
+            ))
             .await
             .unwrap();
         drop(ws_client);
 
-        timeout(
-            1_000,
-            async {
-                loop {
-                    if server_task.is_finished() {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(10)).await;
+        timeout(1_000, async {
+            loop {
+                if server_task.is_finished() {
+                    break;
                 }
-            },
-        )
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
         .await
         .unwrap();
         assert!(server_task.now_or_never().unwrap().unwrap().is_ok());
@@ -996,14 +1069,19 @@ mod tests {
         }));
         let mut message = RendezvousMessage::new();
         message.set_key_exchange(KeyExchange {
-            keys: vec![Bytes::from_static(b"ignored"), Bytes::from_static(b"ignored")],
+            keys: vec![
+                Bytes::from_static(b"ignored"),
+                Bytes::from_static(b"ignored"),
+            ],
             ..Default::default()
         });
         let bytes = message.write_to_bytes().unwrap();
 
-        assert!(!server
-            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
-            .await);
+        assert!(
+            !server
+                .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+                .await
+        );
     }
 
     #[tokio::test]
@@ -1023,15 +1101,23 @@ mod tests {
         }));
         let mut message = RendezvousMessage::new();
         message.set_key_exchange(KeyExchange {
-            keys: vec![Bytes::from_static(b"short"), Bytes::from_static(b"ciphertext")],
+            keys: vec![
+                Bytes::from_static(b"short"),
+                Bytes::from_static(b"ciphertext"),
+            ],
             ..Default::default()
         });
         let bytes = message.write_to_bytes().unwrap();
 
-        assert!(!server
-            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
-            .await);
-        assert!(sink.as_ref().map(|sink| !sink.is_encrypted()).unwrap_or(false));
+        assert!(
+            !server
+                .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+                .await
+        );
+        assert!(sink
+            .as_ref()
+            .map(|sink| !sink.is_encrypted())
+            .unwrap_or(false));
     }
 
     #[tokio::test]
@@ -1052,15 +1138,23 @@ mod tests {
         let (client_pk, _) = box_::gen_keypair();
         let mut message = RendezvousMessage::new();
         message.set_key_exchange(KeyExchange {
-            keys: vec![Bytes::from(client_pk.0.to_vec()), Bytes::from_static(b"bad")],
+            keys: vec![
+                Bytes::from(client_pk.0.to_vec()),
+                Bytes::from_static(b"bad"),
+            ],
             ..Default::default()
         });
         let bytes = message.write_to_bytes().unwrap();
 
-        assert!(!server
-            .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
-            .await);
-        assert!(sink.as_ref().map(|sink| !sink.is_encrypted()).unwrap_or(false));
+        assert!(
+            !server
+                .handle_tcp(&bytes, &mut sink, client_addr, "server-key", false)
+                .await
+        );
+        assert!(sink
+            .as_ref()
+            .map(|sink| !sink.is_encrypted())
+            .unwrap_or(false));
     }
 
     #[tokio::test]
@@ -1424,7 +1518,10 @@ impl RendezvousServer {
     ) -> bool {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(bytes) {
             if requires_tcp_key_exchange(key, sink)
-                && !matches!(msg_in.union, Some(rendezvous_message::Union::KeyExchange(_)))
+                && !matches!(
+                    msg_in.union,
+                    Some(rendezvous_message::Union::KeyExchange(_))
+                )
             {
                 log::warn!("Rejecting unencrypted TCP/WS message from {addr} before key exchange");
                 return false;
@@ -1524,12 +1621,18 @@ impl RendezvousServer {
                     return true;
                 }
                 Some(rendezvous_message::Union::KeyExchange(exchange)) => {
-                    if sink.as_ref().map(|sink| sink.is_encrypted()).unwrap_or(false) {
+                    if sink
+                        .as_ref()
+                        .map(|sink| sink.is_encrypted())
+                        .unwrap_or(false)
+                    {
                         log::warn!("Rejecting duplicate key exchange from {addr}");
                         return false;
                     }
                     if exchange.keys.len() != 2 {
-                        log::error!("Handshake failed from {addr}: invalid phase 2 key exchange message");
+                        log::error!(
+                            "Handshake failed from {addr}: invalid phase 2 key exchange message"
+                        );
                         return false;
                     }
                     match decode_tcp_key_exchange(
@@ -2112,12 +2215,13 @@ impl RendezvousServer {
         match fds.next() {
             Some("h") => {
                 res = format!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
                     "relay-servers(rs) <separated by ,>",
                     "ip-blocker(ib) [<ip>|<number>] [-]",
                     "ip-changes(ic) [<id>|<number>] [-]",
                     "punch-requests(pr) [<number>] [-]",
                     "always-use-relay(aur)",
+                    "must-login(ml) [Y|N]",
                     "test-geo(tg) <ip1> <ip2>"
                 )
             }
@@ -2259,6 +2363,20 @@ impl RendezvousServer {
                         ALWAYS_USE_RELAY.load(Ordering::SeqCst)
                     );
                 }
+            }
+            Some("must-login" | "ml") => {
+                if let Some(rs) = fds.next() {
+                    match rs.to_ascii_lowercase().as_str() {
+                        "y" | "1" | "true" | "yes" | "on" => {
+                            MUST_LOGIN_RUNTIME.store(MUST_LOGIN_RUNTIME_ENABLED, Ordering::SeqCst);
+                        }
+                        "n" | "0" | "false" | "no" | "off" => {
+                            MUST_LOGIN_RUNTIME.store(MUST_LOGIN_RUNTIME_DISABLED, Ordering::SeqCst);
+                        }
+                        _ => {}
+                    }
+                }
+                let _ = writeln!(res, "MUST_LOGIN: {}", must_login_enabled());
             }
             Some("test-geo" | "tg") => {
                 if let Some(rs) = fds.next() {
@@ -2457,12 +2575,16 @@ impl RendezvousServer {
 
     #[inline]
     async fn key_exchange_phase1(&mut self, addr: SocketAddr, sink: &mut Option<Sink>) -> bool {
-        if let Some(message) = build_key_exchange_phase1(&self.inner.secure_tcp_pk_b, &self.inner.sk) {
+        if let Some(message) =
+            build_key_exchange_phase1(&self.inner.secure_tcp_pk_b, &self.inner.sk)
+        {
             log::debug!("KeyExchange phase 1 sent to {addr}");
             Self::send_to_sink(sink, message).await;
             true
         } else {
-            log::error!("Cannot start encrypted TCP/WS key exchange for {addr}: missing server signing key");
+            log::error!(
+                "Cannot start encrypted TCP/WS key exchange for {addr}: missing server signing key"
+            );
             false
         }
     }
