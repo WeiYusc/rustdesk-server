@@ -165,6 +165,14 @@ fn requires_tcp_key_exchange(key: &str, sink: &Option<Sink>) -> bool {
             .unwrap_or(false)
 }
 
+fn tcp_key_exchange_policy_warning(key: &str) -> Option<&'static str> {
+    if !key.is_empty() && !require_tcp_key_exchange_enabled() {
+        Some("Server key is configured; TCP/WS KeyExchange phase1 is sent for official-client compatibility, but plaintext TCP/WS remains accepted unless REQUIRE_TCP_KEY_EXCHANGE=1 or ENCRYPTED_ONLY=1 is set")
+    } else {
+        None
+    }
+}
+
 fn prune_punch_requests(entries: &mut Vec<PunchReqEntry>, now: Instant) {
     entries.retain(|entry| now.duration_since(entry.tm).as_secs() <= PUNCH_REQ_RETENTION_SEC);
     if entries.len() > PUNCH_REQ_MAX_ENTRIES {
@@ -1367,6 +1375,9 @@ impl RendezvousServer {
             log::warn!("{}", warning);
         }
         let (key, sk) = Self::get_server_sk(key);
+        if let Some(warning) = tcp_key_exchange_policy_warning(&key) {
+            log::warn!("{}", warning);
+        }
         let nat_port = port - 1;
         let ws_port = port + 2;
         let pm = PeerMap::new().await?;
