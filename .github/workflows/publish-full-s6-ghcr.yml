@@ -1,0 +1,166 @@
+name: publish full-s6 ghcr
+
+permissions:
+  contents: read
+  packages: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_tag:
+        description: 'Image tag to publish. Defaults to preview-YYYYMMDD-<server_sha>.'
+        required: false
+        type: string
+      api_ref:
+        description: 'WeiYusc/rustdesk-api ref to build into the image.'
+        required: false
+        default: main
+        type: string
+      api_web_ref:
+        description: 'WeiYusc/rustdesk-api-web ref to build into the image.'
+        required: false
+        default: master
+        type: string
+      push_image:
+        description: 'Push to GHCR after local smoke passes.'
+        required: false
+        default: true
+        type: boolean
+
+concurrency:
+  group: publish-full-s6-ghcr-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  IMAGE_NAME: ghcr.io/weiyusc/rustdesk-server-full-s6
+  API_REPOSITORY: WeiYusc/rustdesk-api
+  API_WEB_REPOSITORY: WeiYusc/rustdesk-api-web
+
+jobs:
+  build-smoke-push:
+    name: Build, smoke, and optionally push amd64 full-s6 image
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout rustdesk-server
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          path: rustdesk-server
+
+      - name: Checkout rustdesk-api
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.API_REPOSITORY }}
+          ref: ${{ inputs.api_ref }}
+          fetch-depth: 0
+          path: rustdesk-api
+
+      - name: Checkout rustdesk-api-web
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.API_WEB_REPOSITORY }}
+          ref: ${{ inputs.api_web_ref }}
+          fetch-depth: 0
+          path: rustdesk-api-web
+
+      - name: Resolve source fingerprints and image tag
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          server_sha="$(git -C rustdesk-server rev-parse --short=7 HEAD)"
+          api_sha="$(git -C rustdesk-api rev-parse --short=7 HEAD)"
+          web_sha="$(git -C rustdesk-api-web rev-parse --short=7 HEAD)"
+          if [[ -n "${{ inputs.image_tag }}" ]]; then
+            image_tag="${{ inputs.image_tag }}"
+          else
+            image_tag="preview-$(date -u +%Y%m%d)-${server_sha}"
+          fi
+          image="${IMAGE_NAME}:${image_tag}"
+          {
+            echo "server_sha=${server_sha}"
+            echo "api_sha=${api_sha}"
+            echo "web_sha=${web_sha}"
+            echo "image_tag=${image_tag}"
+            echo "image=${image}"
+          } >> "${GITHUB_OUTPUT}"
+          cat > build-fingerprints.txt <<EOF
+          server=${server_sha}
+          api=${api_sha}
+          web=${web_sha}
+          image=${image}
+          EOF
+          cat build-fingerprints.txt
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: rustdesk-api/go.mod
+          cache-dependency-path: rustdesk-api/go.sum
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.9.0
+          run_install: false
+
+      - name: Build Rust server binaries
+        working-directory: rustdesk-server
+        run: cargo build --release --locked
+
+      - name: Build full-s6 image
+        working-directory: rustdesk-server
+        env:
+          RUSTDESK_API_SOURCE_DIR: ${{ github.workspace }}/rustdesk-api
+          RUSTDESK_API_WEB_SOURCE_DIR: ${{ github.workspace }}/rustdesk-api-web
+          RUSTDESK_FULL_S6_IMAGE: ${{ steps.meta.outputs.image }}
+        run: scripts/build-full-s6-image.sh
+
+      - name: Smoke full-s6 image
+        working-directory: rustdesk-server
+        env:
+          RUSTDESK_FULL_S6_IMAGE: ${{ steps.meta.outputs.image }}
+          RUSTDESK_FULL_S6_CONTAINER: rustdesk-full-s6-ghcr-smoke
+          RUSTDESK_FULL_S6_API_PORT: '25114'
+          RUSTDESK_FULL_S6_HBBS_PORT: '25116'
+          RUSTDESK_FULL_S6_HBBR_PORT: '25117'
+        run: scripts/smoke-full-s6-image.sh
+
+      - name: Inspect image
+        run: |
+          docker image inspect '${{ steps.meta.outputs.image }}' \
+            --format 'IMAGE_ID={{.Id}} CREATED={{.Created}} SIZE={{.Size}}'
+
+      - name: Login to GHCR
+        if: ${{ inputs.push_image }}
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Push image to GHCR
+        if: ${{ inputs.push_image }}
+        run: docker push '${{ steps.meta.outputs.image }}'
+
+      - name: Inspect remote manifest
+        if: ${{ inputs.push_image }}
+        run: docker buildx imagetools inspect '${{ steps.meta.outputs.image }}'
+
+      - name: Upload build fingerprints
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-s6-ghcr-fingerprints
+          path: build-fingerprints.txt
+          if-no-files-found: error
