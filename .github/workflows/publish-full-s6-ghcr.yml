@@ -79,6 +79,7 @@ jobs:
           else
             image_tag="preview-$(date -u +%Y%m%d)-${server_sha}"
           fi
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           image="${IMAGE_NAME}:${image_tag}"
           {
             echo "server_sha=${server_sha}"
@@ -86,12 +87,14 @@ jobs:
             echo "web_sha=${web_sha}"
             echo "image_tag=${image_tag}"
             echo "image=${image}"
+            echo "built_at=${built_at}"
           } >> "${GITHUB_OUTPUT}"
           cat > build-fingerprints.txt <<EOF
           server=${server_sha}
           api=${api_sha}
           web=${web_sha}
           image=${image}
+          built_at=${built_at}
           EOF
           cat build-fingerprints.txt
 
@@ -125,6 +128,10 @@ jobs:
           RUSTDESK_API_SOURCE_DIR: ${{ github.workspace }}/rustdesk-api
           RUSTDESK_API_WEB_SOURCE_DIR: ${{ github.workspace }}/rustdesk-api-web
           RUSTDESK_FULL_S6_IMAGE: ${{ steps.meta.outputs.image }}
+          RUSTDESK_FULL_S6_SERVER_COMMIT: ${{ steps.meta.outputs.server_sha }}
+          RUSTDESK_FULL_S6_API_COMMIT: ${{ steps.meta.outputs.api_sha }}
+          RUSTDESK_FULL_S6_WEB_COMMIT: ${{ steps.meta.outputs.web_sha }}
+          RUSTDESK_FULL_S6_BUILT_AT: ${{ steps.meta.outputs.built_at }}
         run: scripts/build-full-s6-image.sh
 
       - name: Smoke full-s6 image
@@ -141,6 +148,8 @@ jobs:
         run: |
           docker image inspect '${{ steps.meta.outputs.image }}' \
             --format 'IMAGE_ID={{.Id}} CREATED={{.Created}} SIZE={{.Size}}'
+          docker image inspect '${{ steps.meta.outputs.image }}' \
+            --format 'LABEL_REVISION={{ index .Config.Labels "org.opencontainers.image.revision" }} API={{ index .Config.Labels "org.opencontainers.image.rustdesk-api-revision" }} WEB={{ index .Config.Labels "org.opencontainers.image.rustdesk-api-web-revision" }}'
 
       - name: Login to GHCR
         if: ${{ inputs.push_image }}

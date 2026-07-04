@@ -70,13 +70,33 @@ docker run -d \
   "${IMAGE_TAG}" >/dev/null
 
 wait_for_http "http://127.0.0.1:${API_PORT}/api/version"
+BUILD_INFO_JSON="$(http_get "http://127.0.0.1:${API_PORT}/api/build-info")"
 
 for svc in hbbr hbbs api; do
   docker exec "${CONTAINER_NAME}" /command/s6-svstat "/run/s6-rc/servicedirs/${svc}" | grep -q '^up '
 done
 
 docker exec "${CONTAINER_NAME}" test -s /data/id_ed25519.pub
+docker exec "${CONTAINER_NAME}" test -s /etc/rustdesk-full-s6-build.json
 http_get "http://127.0.0.1:${API_PORT}/_admin/" >/dev/null
+
+python3 - "${BUILD_INFO_JSON}" "${IMAGE_TAG}" <<'PY'
+import json
+import sys
+
+payload = json.loads(sys.argv[1])
+image = sys.argv[2]
+if payload.get("code") not in (0, 200):
+    raise SystemExit(f"unexpected build-info payload: {payload!r}")
+data = payload.get("data") or {}
+if data.get("image") != image:
+    raise SystemExit(f"build-info image mismatch: {data!r}, want {image!r}")
+missing = [key for key in ("server_commit", "api_commit", "web_commit", "built_at") if not data.get(key)]
+if missing:
+    raise SystemExit(f"build-info missing {missing}: {data!r}")
+if data.get("source") != "/etc/rustdesk-full-s6-build.json":
+    raise SystemExit(f"build-info source mismatch: {data!r}")
+PY
 
 ADMIN_PASSWORD="$(docker logs "${CONTAINER_NAME}" 2>&1 | sed -n 's/.*Admin Password Is: *//p' | tail -1 | awk '{print $1}' | tr -d '\r')"
 if [[ -z "${ADMIN_PASSWORD}" ]]; then

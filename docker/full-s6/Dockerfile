@@ -4,6 +4,22 @@ ARG S6_OVERLAY_VERSION=3.2.0.0
 ARG S6_ARCH=x86_64
 ARG S6_OVERLAY_NOARCH_SHA256=4b0c0907e6762814c31850e0e6c6762c385571d4656eb8725852b0b1586713b6
 ARG S6_OVERLAY_ARCH_SHA256=ad982a801bd72757c7b1b53539a146cf715e640b4d8f0a6a671a3d1b560fe1e2
+ARG RUSTDESK_FULL_S6_SERVER_COMMIT=unknown
+ARG RUSTDESK_FULL_S6_API_COMMIT=unknown
+ARG RUSTDESK_FULL_S6_WEB_COMMIT=unknown
+ARG RUSTDESK_FULL_S6_IMAGE=rustdesk-server-full-s6:local
+ARG RUSTDESK_FULL_S6_BUILT_AT=unknown
+
+LABEL org.opencontainers.image.title="rustdesk-server-full-s6" \
+  org.opencontainers.image.description="Integrated RustDesk server, API, and Web Admin full-s6 image" \
+  org.opencontainers.image.source="https://github.com/WeiYusc/rustdesk-server" \
+  org.opencontainers.image.revision="${RUSTDESK_FULL_S6_SERVER_COMMIT}" \
+  org.opencontainers.image.created="${RUSTDESK_FULL_S6_BUILT_AT}" \
+  org.opencontainers.image.version="${RUSTDESK_FULL_S6_IMAGE}" \
+  org.opencontainers.image.vendor="WeiYusc" \
+  org.opencontainers.image.ref.name="${RUSTDESK_FULL_S6_IMAGE}" \
+  org.opencontainers.image.rustdesk-api-revision="${RUSTDESK_FULL_S6_API_COMMIT}" \
+  org.opencontainers.image.rustdesk-api-web-revision="${RUSTDESK_FULL_S6_WEB_COMMIT}"
 
 RUN apt-get update \
   && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
@@ -33,6 +49,7 @@ COPY api-runtime/conf /app/conf
 COPY api-runtime/resources /app/resources
 COPY rootfs /
 COPY healthcheck.sh /usr/bin/healthcheck.sh
+COPY build-info.json /etc/rustdesk-full-s6-build.json
 
 RUN chmod +x \
     /usr/bin/hbbs \
