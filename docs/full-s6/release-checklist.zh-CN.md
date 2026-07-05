@@ -1,20 +1,21 @@
-# RustDesk full-s6 预览发布检查清单
+# RustDesk full-s6 发布检查清单
 
-本文面向维护者，用于发布或刷新 `rustdesk-server-full-s6` 预览镜像。它不是普通用户部署指南；普通部署请先阅读 [部署指南](deployment.zh-CN.md) 或 [Docker Compose 模板](compose.zh-CN.md)。
+本文面向维护者，用于发布或刷新 `rustdesk-server-full-s6` 预览镜像和稳定镜像。它不是普通用户部署指南；普通部署请先阅读 [部署指南](deployment.zh-CN.md) 或 [Docker Compose 模板](compose.zh-CN.md)。
 
-目标是让每次预览发布都有同一套可复用流程：固定标签、可选浮动 `preview`、不误发 `latest`、GHCR 验证、测试机 smoke、Compose smoke、Release 页面和收口归档。
+目标是让每次发布都有同一套可复用流程：固定标签、必要时更新浮动通道、GHCR 验证、测试机 smoke、Compose smoke、Release 页面和收口归档。
 
 ## 0. 发布策略
 
-预览阶段默认使用三层策略：
+默认使用三层标签策略：
 
 ```text
 vX.Y.Z-preview.N  固定预览标签，用于复现、排障、回滚
 preview           浮动预览标签，用于愿意跟随最新预览的测试环境
-latest            不发布，留给未来稳定版
+vX.Y.Z            固定稳定标签，用于稳定版可复现部署
+latest            浮动稳定标签，仅在稳定版通过后且维护者明确批准时发布
 ```
 
-除非明确决定进入稳定版，否则不要发布 `latest`。
+预览发布不得发布 `latest`；稳定发布只有在稳定版准入通过且维护者明确批准后才发布 `latest`。
 
 ## 1. 发布前同步和指纹确认
 
@@ -61,9 +62,9 @@ docs/full-s6/release-notes-*.en.md
 
 重点检查：
 
-- 是否都推荐固定预览标签或摘要；
-- 是否明确 `preview` 会移动；
-- 是否明确没有发布 `latest`；
+- 是否都推荐固定预览/稳定标签或摘要；
+- 是否明确 `preview` 会移动且不自动等同稳定版；
+- 预览文档是否明确不发布 `latest`；稳定文档是否说明 `latest` 只跟随最新稳定版；
 - Compose 模板中的镜像标签是否符合当前推荐；
 - 升级文档是否明确备份 `/data` 和 `/app/data`；
 - 文档示例是否只使用示例域名、占位符和 `[REDACTED]`，不要出现真实密码、token、域名、IP 或账号标识。
@@ -249,7 +250,7 @@ Release 页面必须包含：
 
 - 固定标签和摘要；
 - 如发布了 `preview`，说明它是浮动标签并记录当前摘要；
-- 明确 `latest` 未发布；
+- 预览发布必须明确 `latest` 未发布；稳定发布必须明确 `latest` 是否发布，以及它会随最新稳定版移动；
 - server/API/Web 指纹；
 - workflow run URL；
 - 部署指南、升级回滚指南、Compose 模板入口；
@@ -292,7 +293,7 @@ gh release view vX.Y.Z-preview.N \
 固定标签
 digest
 preview 标签和 digest（如有）
-latest 是否不存在
+latest 是否不存在（预览）或是否已作为稳定版浮动标签发布（稳定版）
 workflow run URL
 Release URL
 测试机镜像和 health
@@ -320,14 +321,14 @@ git rev-list --left-right --count HEAD...origin/$(git branch --show-current)
 
 ## 10. 不要跳过的边界说明
 
-预览阶段的发布报告必须明确：
+预览发布报告必须明确：
 
 - 这不是稳定生产版本；
 - 主要验证平台；
 - 是否重复了真实客户端连接矩阵；
 - `MUST_LOGIN` 是运行时状态；
 - `preview` 标签会移动；
-- `latest` 未发布；
+- `latest` 未发布（仅针对预览发布）；
 - 数据回滚和容器回滚不是一回事，升级前必须备份持久化数据。
 
 ## 11. 稳定版发布附录

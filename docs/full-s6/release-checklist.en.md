@@ -1,20 +1,21 @@
-# RustDesk full-s6 preview release checklist
+# RustDesk full-s6 release checklist
 
-This document is for maintainers who publish or refresh the `rustdesk-server-full-s6` preview image. It is not the normal user deployment guide. For deployment, start with the [deployment guide](deployment.en.md) or the [Docker Compose template](compose.en.md).
+This document is for maintainers who publish or refresh `rustdesk-server-full-s6` preview and stable images. It is not the normal user deployment guide. For deployment, start with the [deployment guide](deployment.en.md) or the [Docker Compose template](compose.en.md).
 
-The goal is to make every preview release follow the same reusable flow: pinned tag, optional moving `preview`, no accidental `latest`, GHCR verification, test-host smoke, Compose smoke, Release page update, and closeout archive.
+The goal is to make every release follow the same reusable flow: pinned tag, deliberate moving-channel updates, GHCR verification, test-host smoke, Compose smoke, Release page update, and closeout archive.
 
 ## 0. Release policy
 
-The preview line uses this tag policy by default:
+The default tag policy is:
 
 ```text
 vX.Y.Z-preview.N  pinned preview tag for reproduction, troubleshooting, and rollback
 preview           moving preview tag for test environments that intentionally follow the newest preview
-latest            not published; reserved for a future stable release
+vX.Y.Z            pinned stable tag for reproducible stable deployments
+latest            moving stable tag, published only after stable passes and the maintainer explicitly approves it
 ```
 
-Do not publish `latest` unless the project explicitly moves to a stable release.
+Preview releases must not publish `latest`; stable releases publish `latest` only after the stable gate passes and the maintainer explicitly approves it.
 
 ## 1. Pre-release sync and source fingerprints
 
@@ -61,9 +62,9 @@ docs/full-s6/release-notes-*.en.md
 
 Check especially that:
 
-- the docs recommend a pinned preview tag or digest;
-- the docs state that `preview` can move;
-- the docs state that `latest` is not published;
+- the docs recommend a pinned preview/stable tag or digest;
+- the docs state that `preview` can move and is not automatically equivalent to stable;
+- preview docs state that `latest` is not published, while stable docs state that `latest` follows the newest stable release;
 - the Compose template image matches the current recommendation;
 - the upgrade guide explicitly backs up `/data` and `/app/data`;
 - examples use only sample domains, placeholders, and `[REDACTED]`; they must not include real passwords, tokens, domains, IP addresses, or account identifiers.
@@ -249,7 +250,7 @@ The Release page must include:
 
 - pinned tag and digest;
 - moving `preview` tag and its current digest, if published;
-- explicit statement that `latest` is not published;
+- for preview releases, an explicit statement that `latest` is not published; for stable releases, whether `latest` is published and that it moves with the newest stable release;
 - server/API/Web fingerprints;
 - workflow run URL;
 - deployment guide, upgrade/rollback guide, and Compose template links;
@@ -292,7 +293,7 @@ Closeout should record:
 pinned tag
 digest
 preview tag and digest, if any
-whether latest is absent
+whether latest is absent for preview, or published as the moving stable tag for stable
 workflow run URL
 Release URL
 test-host image and health
@@ -327,7 +328,7 @@ Every preview release report must state:
 - whether the real-client connection matrix was repeated;
 - `MUST_LOGIN` is runtime state;
 - the `preview` tag can move;
-- `latest` is not published;
+- `latest` is not published (preview releases only);
 - data rollback and container rollback are not the same; persistent data must be backed up before upgrades.
 
 ## 11. Stable release appendix

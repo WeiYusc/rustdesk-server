@@ -11,7 +11,7 @@ full-s6 是 `WeiYusc/rustdesk-server` 的单容器集成方案，用 s6-overlay 
 - `rustdesk-api`
 - 构建后的 `rustdesk-api-web` Web Admin，注入到 `/app/resources/admin`
 
-> 状态说明：该方案已经完成本地构建、smoke 验证和 GHCR 预览镜像发布。面向普通部署请优先阅读 `docs/full-s6/` 下的部署、升级和发布说明；本文主要保留本地构建与开发验证流程。
+> 状态说明：该方案已经完成本地构建、smoke 验证、GHCR 预览镜像发布，以及 `v0.1.0` 稳定版发布。面向普通部署请优先阅读 `docs/full-s6/` 下的部署、Compose、升级和发布说明；本文主要保留本地构建与开发验证流程。
 
 ### 构建
 
@@ -82,7 +82,8 @@ docker run -d \
 
 - [部署指南](../../docs/full-s6/deployment.zh-CN.md) / [Deployment guide](../../docs/full-s6/deployment.en.md)
 - [升级与回滚指南](../../docs/full-s6/upgrade-rollback.zh-CN.md) / [Upgrade and rollback guide](../../docs/full-s6/upgrade-rollback.en.md)
-- [Preview 20260705 发布说明](../../docs/full-s6/release-notes-preview-20260705.zh-CN.md) / [Release notes](../../docs/full-s6/release-notes-preview-20260705.en.md)
+- [v0.1.0 发布说明](../../docs/full-s6/release-notes-v0.1.0.zh-CN.md) / [v0.1.0 release notes](../../docs/full-s6/release-notes-v0.1.0.en.md)
+- [Preview 20260705 发布说明](../../docs/full-s6/release-notes-preview-20260705.zh-CN.md) / [Preview 20260705 release notes](../../docs/full-s6/release-notes-preview-20260705.en.md)
 
 ### 生产注意事项
 
@@ -100,7 +101,7 @@ The full-s6 path is a single-container integration option for `WeiYusc/rustdesk-
 - `rustdesk-api`
 - built `rustdesk-api-web` Web Admin assets injected into `/app/resources/admin`
 
-> Status: local build, smoke tests, and a GHCR preview image are verified. For normal deployments, prefer the deployment, upgrade, and release-note documents under `docs/full-s6/`; this file focuses on local build and development validation.
+> Status: local build, smoke tests, a GHCR preview image, and the `v0.1.0` stable release are verified. For normal deployments, prefer the deployment, Compose, upgrade, and release-note documents under `docs/full-s6/`; this file focuses on local build and development validation.
 
 ### Build
 
@@ -171,7 +172,8 @@ The first boot prints a random admin password in API logs. Capture it securely o
 
 - [部署指南](../../docs/full-s6/deployment.zh-CN.md) / [Deployment guide](../../docs/full-s6/deployment.en.md)
 - [升级与回滚指南](../../docs/full-s6/upgrade-rollback.zh-CN.md) / [Upgrade and rollback guide](../../docs/full-s6/upgrade-rollback.en.md)
-- [Preview 20260705 发布说明](../../docs/full-s6/release-notes-preview-20260705.zh-CN.md) / [Release notes](../../docs/full-s6/release-notes-preview-20260705.en.md)
+- [v0.1.0 发布说明](../../docs/full-s6/release-notes-v0.1.0.zh-CN.md) / [v0.1.0 release notes](../../docs/full-s6/release-notes-v0.1.0.en.md)
+- [Preview 20260705 发布说明](../../docs/full-s6/release-notes-preview-20260705.zh-CN.md) / [Preview 20260705 release notes](../../docs/full-s6/release-notes-preview-20260705.en.md)
 
 ### Production notes
 
