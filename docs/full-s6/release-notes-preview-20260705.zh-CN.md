@@ -22,12 +22,27 @@ sha256:0b0046ae20c4cbc88b7cec9eaa8ef96440119258c9286deceba0d8fcebc61ce7
 ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
 ```
 
-命名预览镜像是后续以正式预览标签重新构建和发布的镜像，包含本仓库发布准备文档提交。其摘要为：
+命名预览镜像是后续以正式预览标签重新构建和发布的镜像，包含本仓库发布准备文档提交。它和浮动 `preview` 标签可能对应不同构建摘要；需要精确复现时请固定标签或摘要。命名预览摘要为：
 
 ```text
 sha256:3c2e40e5d2539bb2a924d8cba28dd48aa7e338e096c253af05875b39f3344ccd
 ```
 
+
+
+浮动预览标签：
+
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+```
+
+当前 `preview` 摘要：
+
+```text
+sha256:a8cb74387f3e5f98b8a37dd269b71ffeb9ab706c48724e92038876d0f598c4a1
+```
+
+`preview` 会随新的预览发布移动；需要可复现部署或排障时请固定命名标签或摘要。
 
 源码指纹：
 

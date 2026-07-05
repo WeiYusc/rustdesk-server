@@ -27,13 +27,21 @@
 
 ### 当前推荐的预览镜像
 
+固定预览版本：
+
 ```text
 ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
 ```
 
-该镜像已完成构建、GHCR 拉取、测试机部署、接口服务、管理后台和基础浏览器验证。详细摘要和边界见 [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md)；该说明也记录了本次命名预览标签。
+跟随最新预览的浮动标签：
 
-> 当前没有发布 `latest` 标签。请使用明确的预览标签和摘要值部署。
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+```
+
+该预览版本线已完成构建、GHCR 拉取、测试机部署、接口服务、管理后台和基础浏览器验证。固定标签和浮动标签可能对应不同构建摘要；需要精确复现时请固定标签或摘要。详细摘要和边界见 [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md)；该说明也记录了本次命名预览标签。
+
+> 当前没有发布 `latest` 标签。需要可复现部署或排障时，请优先固定 `v0.1.0-preview.1` 或摘要；只有愿意跟随最新预览时才使用 `preview`。
 
 ### 组件关系
 
@@ -97,13 +105,21 @@ cargo build --release
 
 ### Current recommended preview image
 
+Pinned preview version:
+
 ```text
 ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
 ```
 
-This image has passed build, GHCR pull, test-host deployment, API, Web Admin, and basic browser validation. See the [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) for details and limits; those notes also record the named preview tag.
+Moving tag for the newest preview:
 
-> No `latest` tag is published. Deploy with an explicit preview tag and digest.
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+```
+
+This preview line has passed build, GHCR pull, test-host deployment, API, Web Admin, and basic browser validation. The pinned tag and moving tag may resolve to different digests; pin a tag or digest when exact reproduction matters. See the [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) for details and limits; those notes also record the named preview tag.
+
+> No `latest` tag is published. For reproducible deployment and troubleshooting, prefer `v0.1.0-preview.1` or a digest. Use `preview` only when you intentionally want to follow the newest preview.
 
 ### Component relationship
 

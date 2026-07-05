@@ -16,7 +16,7 @@ Named preview release:
 ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
 ```
 
-The named preview image was rebuilt and published later from the release-readiness documentation commit. Its digest is:
+The named preview image was rebuilt and published later from the release-readiness documentation commit. It and the moving `preview` tag may resolve to different digests; pin a tag or digest when exact reproduction matters. The named preview digest is:
 
 ```text
 sha256:3c2e40e5d2539bb2a924d8cba28dd48aa7e338e096c253af05875b39f3344ccd
@@ -27,6 +27,21 @@ Original date-based image digest:
 ```text
 sha256:0b0046ae20c4cbc88b7cec9eaa8ef96440119258c9286deceba0d8fcebc61ce7
 ```
+
+
+Moving preview tag:
+
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+```
+
+Current `preview` digest:
+
+```text
+sha256:a8cb74387f3e5f98b8a37dd269b71ffeb9ab706c48724e92038876d0f598c4a1
+```
+
+`preview` moves when a newer preview is published. Pin the named tag or digest when you need reproducible deployment or troubleshooting.
 
 Source fingerprints:
 

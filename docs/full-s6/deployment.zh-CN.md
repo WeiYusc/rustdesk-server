@@ -61,6 +61,13 @@ openssl rand -hex 32
 
 请妥善保存，不要写入公开文档、截图或工单。
 
+
+## 镜像标签选择
+
+- `v0.1.0-preview.1`：固定预览版本，适合可复现部署、排障和回滚。
+- `preview`：浮动标签，指向最新预览版，适合愿意跟随预览更新的测试环境。
+- `latest`：暂不发布，避免把预览版误认为稳定版。
+
 ## 3. 启动容器
 
 如果你希望复制 `docker-compose.yml` 和 `.env` 模板，优先查看 [Docker Compose 模板](compose.zh-CN.md)。下面的 `docker run` 示例适合手动部署或理解每个参数的作用。

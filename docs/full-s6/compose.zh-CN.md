@@ -68,7 +68,7 @@ services:
 
 ```env
 # RustDesk full-s6 集成镜像。
-# 不要使用 latest；请固定明确的预览标签或摘要。
+# 不要使用 latest；建议固定明确的预览标签或摘要。若想跟随最新预览，可改为 :preview。
 RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
 
 # 客户端可以访问的公网域名或 IP，用于标识服务器和中继服务器。
@@ -98,6 +98,15 @@ openssl rand -hex 32
 ```env
 RUSTDESK_API_JWT_KEY=...
 ```
+
+
+如果你愿意自动跟随最新预览，可以把镜像改成：
+
+```env
+RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+```
+
+排障和接近生产环境的试用仍建议固定 `v0.1.0-preview.1` 或摘要。
 
 ## 4. 启动
 
@@ -159,7 +168,7 @@ curl -fsSI https://<your-domain>/_admin/ | head -5
 
 ## 8. 注意事项
 
-- 不要使用 `latest`，请固定镜像标签或摘要。
+- 不要使用 `latest`。为了可复现，请固定镜像标签或摘要；只有明确想跟随最新预览时才使用 `preview`。
 - `.env` 可能包含真实密钥，不要公开。
 - `MUST_LOGIN` 是启动默认值；管理后台运行时开关不会写入数据库。
 - 对外使用时建议配置 HTTPS。

@@ -61,6 +61,13 @@ openssl rand -hex 32
 
 Store it securely. Do not paste it into public documentation, screenshots, or issue reports.
 
+
+## Image tag policy
+
+- `v0.1.0-preview.1`: pinned preview version for reproducible deployment, troubleshooting, and rollback.
+- `preview`: moving tag for the newest preview, suitable for test environments that intentionally follow preview updates.
+- `latest`: not published yet, to avoid presenting a preview image as stable.
+
 ## 3. Start the container
 
 If you want to copy a `docker-compose.yml` and `.env` template, start with the [Docker Compose template](compose.en.md). The `docker run` example below is useful for manual deployment or understanding each option.
