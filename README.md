@@ -22,6 +22,7 @@
 | 复制 Docker Compose 配置模板 | [Compose 模板](docs/full-s6/compose.zh-CN.md) | [Compose template](docs/full-s6/compose.en.md) |
 | 升级与回滚 | [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md) | [Upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) |
 | 当前预览镜像说明 | [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md) | [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) |
+| 预览发布检查清单 | [发布检查清单](docs/full-s6/release-checklist.zh-CN.md) | [Release checklist](docs/full-s6/release-checklist.en.md) |
 | 本地构建与 smoke | [docker/full-s6/README.md](docker/full-s6/README.md) | [docker/full-s6/README.md](docker/full-s6/README.md) |
 | 兼容性与验证边界 | [compatibility.md](compatibility.md) | [compatibility.md](compatibility.md) |
 
@@ -100,6 +101,7 @@ cargo build --release
 | Copy Docker Compose template | [Compose 模板](docs/full-s6/compose.zh-CN.md) | [Compose template](docs/full-s6/compose.en.md) |
 | Upgrade and rollback | [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md) | [Upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) |
 | Current preview image | [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md) | [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) |
+| Preview release checklist | [发布检查清单](docs/full-s6/release-checklist.zh-CN.md) | [Release checklist](docs/full-s6/release-checklist.en.md) |
 | Local build and smoke | [docker/full-s6/README.md](docker/full-s6/README.md) | [docker/full-s6/README.md](docker/full-s6/README.md) |
 | Compatibility and validation boundary | [compatibility.md](compatibility.md) | [compatibility.md](compatibility.md) |
 
