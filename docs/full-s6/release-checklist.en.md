@@ -318,14 +318,45 @@ The final result should be clean, with `HEAD...origin/<branch>` equal to:
 0 0
 ```
 
-## 10. Boundaries that must not be skipped
+## 10. Required boundary statements
 
 Every preview release report must state:
 
 - this is not a stable production release;
-- the primary validated platform;
-- whether the real official-client connection matrix was repeated;
+- the primary validation platform;
+- whether the real-client connection matrix was repeated;
 - `MUST_LOGIN` is runtime state;
 - the `preview` tag can move;
 - `latest` is not published;
 - data rollback and container rollback are not the same; persistent data must be backed up before upgrades.
+
+## 11. Stable release appendix
+
+Before a `vX.Y.Z` stable release, complete and record stable-readiness evidence:
+
+```text
+repo / GHCR / Release / test-host baseline reconfirmation
+stable scope documentation audit
+real-client matrix rerun, or explicit maintainer acceptance of existing evidence
+/data and /app/data backup, replacement, and rollback rehearsal
+Compose template live smoke with the stable tag
+Release notes state supported platform, latest policy, and known limits
+```
+
+Stable tag policy:
+
+```text
+vX.Y.Z  pinned stable tag for reproducible deployment, troubleshooting, and rollback
+latest  moving stable tag, published only after stable passes and the maintainer explicitly approves it
+preview remains the preview channel and is not automatically equivalent to stable
+```
+
+Every stable release report must state:
+
+- whether the stable scope is limited to `linux/amd64`;
+- whether `latest` is published and that it moves with the newest stable release;
+- whether `linux/arm64` / multi-architecture support is claimed or explicitly excluded;
+- whether the real official-client matrix was rerun; if not, state that accepted prior evidence is carried forward;
+- backup, replacement, and rollback rehearsal results;
+- whether the Compose template was validated with the stable tag;
+- whether `preview` remains the preview channel.

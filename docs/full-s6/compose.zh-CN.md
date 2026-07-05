@@ -27,7 +27,7 @@ docker-compose.yml
 ```yaml
 services:
   rustdesk-full-s6:
-    image: ${RUSTDESK_FULL_S6_IMAGE:-ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1}
+    image: ${RUSTDESK_FULL_S6_IMAGE:-ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0}
     container_name: rustdesk-full-s6
     restart: unless-stopped
     ports:
@@ -68,8 +68,8 @@ services:
 
 ```env
 # RustDesk full-s6 集成镜像。
-# 不要使用 latest；建议固定明确的预览标签或摘要。若想跟随最新预览，可改为 :preview。
-RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
+# 建议固定明确的稳定标签或摘要。latest 会跟随最新稳定版移动；preview 保留给预览测试。
+RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0
 
 # 客户端可以访问的公网域名或 IP，用于标识服务器和中继服务器。
 # 这里不要填写 http://、https:// 或端口。
@@ -100,13 +100,13 @@ RUSTDESK_API_JWT_KEY=...
 ```
 
 
-如果你愿意自动跟随最新预览，可以把镜像改成：
+如果你接受稳定版浮动标签，可以把镜像改成：
 
 ```env
-RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:latest
 ```
 
-排障和接近生产环境的试用仍建议固定 `v0.1.0-preview.1` 或摘要。
+排障和生产环境仍建议固定 `v0.1.0` 或摘要。`preview` 只建议用于愿意跟随预览更新的测试环境。
 
 ## 4. 启动
 
@@ -168,7 +168,7 @@ curl -fsSI https://<your-domain>/_admin/ | head -5
 
 ## 8. 注意事项
 
-- 不要使用 `latest`。为了可复现，请固定镜像标签或摘要；只有明确想跟随最新预览时才使用 `preview`。
+- 为了可复现，请固定 `v0.1.0` 或摘要；`latest` 是稳定版浮动标签，会随新的稳定版移动。
 - `.env` 可能包含真实密钥，不要公开。
 - `MUST_LOGIN` 是启动默认值；管理后台运行时开关不会写入数据库。
 - 对外使用时建议配置 HTTPS。

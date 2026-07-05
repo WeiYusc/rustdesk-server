@@ -329,3 +329,34 @@ git rev-list --left-right --count HEAD...origin/$(git branch --show-current)
 - `preview` 标签会移动；
 - `latest` 未发布；
 - 数据回滚和容器回滚不是一回事，升级前必须备份持久化数据。
+
+## 11. 稳定版发布附录
+
+进入 `vX.Y.Z` 稳定版前，必须先完成并记录稳定版准入证据：
+
+```text
+repo / GHCR / Release / 测试机 baseline 重新确认
+stable scope 文档审计
+真实客户端矩阵重跑，或由维护者明确接受既有证据
+/data 与 /app/data 备份、替换和回滚演练
+Compose 模板使用稳定标签实机 smoke
+Release notes 明确支持平台、latest 策略和已知边界
+```
+
+稳定版标签策略：
+
+```text
+vX.Y.Z  固定稳定标签，用于可复现部署、排障和回滚
+latest  浮动稳定标签，仅在稳定版通过后且维护者明确批准时发布
+preview 继续作为预览通道，不自动等同于稳定版
+```
+
+稳定版发布报告必须明确：
+
+- 稳定范围是否仅限 `linux/amd64`；
+- 是否发布 `latest`，以及 `latest` 会随最新稳定版移动；
+- 是否声明或排除 `linux/arm64` / 多架构支持；
+- 是否重新执行真实官方客户端矩阵；如果没有，必须说明沿用已接受的既有证据；
+- 备份、替换和回滚演练结果；
+- Compose 模板是否已按稳定标签验证；
+- `preview` 是否保持预览通道。

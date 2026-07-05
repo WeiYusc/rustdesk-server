@@ -27,7 +27,7 @@ docker-compose.yml
 ```yaml
 services:
   rustdesk-full-s6:
-    image: ${RUSTDESK_FULL_S6_IMAGE:-ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1}
+    image: ${RUSTDESK_FULL_S6_IMAGE:-ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0}
     container_name: rustdesk-full-s6
     restart: unless-stopped
     ports:
@@ -68,8 +68,8 @@ Then edit `PUBLIC_HOST`, `API_SERVER`, and `RUSTDESK_API_JWT_KEY`. If the placeh
 
 ```env
 # RustDesk full-s6 integrated image.
-# Do not use latest; prefer an explicit preview tag or digest. Use :preview only if you want to follow the newest preview.
-RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
+# Prefer an explicit stable tag or digest. latest follows the newest stable release; preview remains for preview testing.
+RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0
 
 # Public host or IP that RustDesk clients can reach for hbbs/hbbr.
 # Do not include a scheme or port here.
@@ -100,13 +100,13 @@ RUSTDESK_API_JWT_KEY=...
 ```
 
 
-If you intentionally want to follow the newest preview, change the image to:
+If you accept the moving stable tag, change the image to:
 
 ```env
-RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+RUSTDESK_FULL_S6_IMAGE=ghcr.io/weiyusc/rustdesk-server-full-s6:latest
 ```
 
-For troubleshooting and production-like trials, keep `v0.1.0-preview.1` or a digest pinned.
+For troubleshooting and production deployments, keep `v0.1.0` or a digest pinned. Use `preview` only for test environments that intentionally follow preview updates.
 
 ## 4. Start the stack
 
@@ -168,7 +168,7 @@ For detailed upgrade and rollback steps, see:
 
 ## 8. Notes
 
-- Do not use `latest`. Pin an explicit image tag or digest for reproducibility; use `preview` only when you intentionally follow preview updates.
+- For reproducibility, pin `v0.1.0` or a digest. `latest` is the moving stable tag and can move when a newer stable release is published.
 - `.env` may contain real secrets. Do not publish it.
 - `MUST_LOGIN` is the startup default. The Web Admin runtime toggle is not database-persistent.
 - HTTPS is recommended for external use.

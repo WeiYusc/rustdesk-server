@@ -64,9 +64,9 @@ Store it securely. Do not paste it into public documentation, screenshots, or is
 
 ## Image tag policy
 
-- `v0.1.0-preview.1`: pinned preview version for reproducible deployment, troubleshooting, and rollback.
-- `preview`: moving tag for the newest preview, suitable for test environments that intentionally follow preview updates.
-- `latest`: not published yet, to avoid presenting a preview image as stable.
+- `v0.1.0`: stable version for reproducible deployment, troubleshooting, and rollback.
+- `latest`: moving stable tag that follows the newest stable release; confirm you accept a moving tag before using it in automation.
+- `preview`: preview channel for test environments that intentionally follow preview updates; it is not automatically equivalent to stable.
 
 ## 3. Start the container
 
@@ -200,7 +200,9 @@ ss -lnuap | grep ':21116'
 
 ## 9. Known limits
 
-- The current preview image is primarily validated on `linux/amd64`.
-- This document does not publish or recommend a `latest` tag.
+- The current stable image only claims validated `linux/amd64` support.
+- `linux/arm64` and multi-architecture images are not published or claimed in this release; they require separate runtime validation later.
+- `latest` is the moving stable tag; pin `v0.1.0` or a digest when reproducibility matters.
 - The forced-login runtime toggle is not stored in the database; restart behavior follows the environment variable.
+- The full real official-client matrix was not rerun for this stable release; it carries forward the existing accepted client-matrix evidence.
 - Real client connection behavior depends on client version, network conditions, and server configuration.

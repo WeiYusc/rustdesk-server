@@ -21,28 +21,29 @@
 | 部署 full-s6 集成镜像 | [部署指南](docs/full-s6/deployment.zh-CN.md) | [Deployment guide](docs/full-s6/deployment.en.md) |
 | 复制 Docker Compose 配置模板 | [Compose 模板](docs/full-s6/compose.zh-CN.md) | [Compose template](docs/full-s6/compose.en.md) |
 | 升级与回滚 | [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md) | [Upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) |
+| 当前稳定镜像说明 | [v0.1.0 发布说明](docs/full-s6/release-notes-v0.1.0.zh-CN.md) | [v0.1.0 release notes](docs/full-s6/release-notes-v0.1.0.en.md) |
 | 当前预览镜像说明 | [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md) | [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) |
-| 预览发布检查清单 | [发布检查清单](docs/full-s6/release-checklist.zh-CN.md) | [Release checklist](docs/full-s6/release-checklist.en.md) |
+| 发布检查清单 | [发布检查清单](docs/full-s6/release-checklist.zh-CN.md) | [Release checklist](docs/full-s6/release-checklist.en.md) |
 | 本地构建与 smoke | [docker/full-s6/README.md](docker/full-s6/README.md) | [docker/full-s6/README.md](docker/full-s6/README.md) |
 | 兼容性与验证边界 | [compatibility.md](compatibility.md) | [compatibility.md](compatibility.md) |
 
-### 当前推荐的预览镜像
+### 当前推荐镜像
 
-固定预览版本：
-
-```text
-ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
-```
-
-跟随最新预览的浮动标签：
+稳定版本：
 
 ```text
-ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0
 ```
 
-该预览版本线已完成构建、GHCR 拉取、测试机部署、接口服务、管理后台和基础浏览器验证。固定标签和浮动标签可能对应不同构建摘要；需要精确复现时请固定标签或摘要。详细摘要和边界见 [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md)；该说明也记录了本次命名预览标签。
+稳定版浮动标签：
 
-> 当前没有发布 `latest` 标签。需要可复现部署或排障时，请优先固定 `v0.1.0-preview.1` 或摘要；只有愿意跟随最新预览时才使用 `preview`。
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:latest
+```
+
+`v0.1.0` 是面向 `linux/amd64` 的 full-s6 稳定发布标签。发布判断基于当前预览线的构建、GHCR 拉取、测试机部署、接口服务、管理后台、Compose smoke、备份/替换/回滚演练，以及已接受的历史真实客户端矩阵证据；本次稳定发布未重新执行完整真实官方客户端矩阵。详细摘要和边界见 [v0.1.0 发布说明](docs/full-s6/release-notes-v0.1.0.zh-CN.md)。
+
+> 需要可复现部署或排障时，请优先固定 `v0.1.0` 或摘要；`latest` 会跟随最新稳定版移动。预览通道 `preview` 继续保留给测试环境，不自动等同于稳定版。
 
 ### 组件关系
 
@@ -76,9 +77,9 @@ cargo build --release
 
 ### 已知边界
 
-- 当前 full-s6 预览镜像主要验证 `linux/amd64`。
+- 当前 full-s6 稳定镜像仅声明支持已验证的 `linux/amd64`。
 - `MUST_LOGIN` 的管理后台开关是运行时状态；容器或 `hbbs` 重启后会回到环境变量默认值。
-- 多架构镜像、正式语义化版本和 `latest` 标签尚未发布。
+- 当前不发布、不声明 `linux/arm64` 或多架构镜像支持；多架构需要后续独立运行时验证。
 - 真实客户端连接结果会受客户端版本、网络和配置影响；客户端登录与配置问题请参考排障文档。
 
 ## English
@@ -100,28 +101,29 @@ cargo build --release
 | Deploy the full-s6 integrated image | [部署指南](docs/full-s6/deployment.zh-CN.md) | [Deployment guide](docs/full-s6/deployment.en.md) |
 | Copy Docker Compose template | [Compose 模板](docs/full-s6/compose.zh-CN.md) | [Compose template](docs/full-s6/compose.en.md) |
 | Upgrade and rollback | [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md) | [Upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) |
+| Current stable image | [v0.1.0 发布说明](docs/full-s6/release-notes-v0.1.0.zh-CN.md) | [v0.1.0 release notes](docs/full-s6/release-notes-v0.1.0.en.md) |
 | Current preview image | [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md) | [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) |
-| Preview release checklist | [发布检查清单](docs/full-s6/release-checklist.zh-CN.md) | [Release checklist](docs/full-s6/release-checklist.en.md) |
+| Release checklist | [发布检查清单](docs/full-s6/release-checklist.zh-CN.md) | [Release checklist](docs/full-s6/release-checklist.en.md) |
 | Local build and smoke | [docker/full-s6/README.md](docker/full-s6/README.md) | [docker/full-s6/README.md](docker/full-s6/README.md) |
 | Compatibility and validation boundary | [compatibility.md](compatibility.md) | [compatibility.md](compatibility.md) |
 
-### Current recommended preview image
+### Current recommended image
 
-Pinned preview version:
-
-```text
-ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
-```
-
-Moving tag for the newest preview:
+Stable version:
 
 ```text
-ghcr.io/weiyusc/rustdesk-server-full-s6:preview
+ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0
 ```
 
-This preview line has passed build, GHCR pull, test-host deployment, API, Web Admin, and basic browser validation. The pinned tag and moving tag may resolve to different digests; pin a tag or digest when exact reproduction matters. See the [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) for details and limits; those notes also record the named preview tag.
+Stable moving tag:
 
-> No `latest` tag is published. For reproducible deployment and troubleshooting, prefer `v0.1.0-preview.1` or a digest. Use `preview` only when you intentionally want to follow the newest preview.
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:latest
+```
+
+`v0.1.0` is the stable full-s6 release tag for `linux/amd64`. The release decision is based on the current preview line's build, GHCR pull, test-host deployment, API, Web Admin, Compose smoke, backup/replacement/rollback rehearsal, and accepted existing real-client matrix evidence; the full real official-client matrix was not rerun for this stable release. See the [v0.1.0 release notes](docs/full-s6/release-notes-v0.1.0.en.md) for details and limits.
+
+> For reproducible deployment and troubleshooting, prefer `v0.1.0` or a digest. The `latest` tag follows the newest stable release and can move. The `preview` channel remains for test environments and is not automatically equivalent to stable.
 
 ### Component relationship
 
@@ -155,7 +157,7 @@ Artifacts are generated under `target/release/`:
 
 ### Known limits
 
-- The current full-s6 preview image is primarily validated on `linux/amd64`.
+- The current full-s6 stable image only claims validated `linux/amd64` support.
 - The Web Admin `MUST_LOGIN` toggle applies runtime state; after the container or `hbbs` restarts, the environment-variable default applies again.
-- Multi-architecture images, stable semantic-version releases, and a `latest` tag are not published yet.
+- `linux/arm64` and multi-architecture images are not published or claimed in this release; they require separate runtime validation later.
 - Real client connection behavior depends on client version, network conditions, and configuration. See the troubleshooting guide for client login and server configuration issues.
