@@ -16,6 +16,19 @@ ghcr.io/weiyusc/rustdesk-server-full-s6:preview-20260705-e1e8bbd-docs-guide
 sha256:0b0046ae20c4cbc88b7cec9eaa8ef96440119258c9286deceba0d8fcebc61ce7
 ```
 
+命名预览发布：
+
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
+```
+
+命名预览镜像是后续以正式预览标签重新构建和发布的镜像，包含本仓库发布准备文档提交。其摘要为：
+
+```text
+sha256:3c2e40e5d2539bb2a924d8cba28dd48aa7e338e096c253af05875b39f3344ccd
+```
+
+
 源码指纹：
 
 | 组件 | 指纹 | 说明 |

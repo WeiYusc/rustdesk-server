@@ -63,6 +63,8 @@ openssl rand -hex 32
 
 ## 3. 启动容器
 
+如果你希望复制 `docker-compose.yml` 和 `.env` 模板，优先查看 [Docker Compose 模板](compose.zh-CN.md)。下面的 `docker run` 示例适合手动部署或理解每个参数的作用。
+
 请把 `<your-host-or-ip>`、`<your-domain>`、`<random-64-hex-character-secret>` 和 `<tag>` 替换为你的值。
 
 ```bash

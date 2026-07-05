@@ -10,7 +10,19 @@ This note is for users and operators evaluating the `rustdesk-server-full-s6` in
 ghcr.io/weiyusc/rustdesk-server-full-s6:preview-20260705-e1e8bbd-docs-guide
 ```
 
-Digest:
+Named preview release:
+
+```text
+ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
+```
+
+The named preview image was rebuilt and published later from the release-readiness documentation commit. Its digest is:
+
+```text
+sha256:3c2e40e5d2539bb2a924d8cba28dd48aa7e338e096c253af05875b39f3344ccd
+```
+
+Original date-based image digest:
 
 ```text
 sha256:0b0046ae20c4cbc88b7cec9eaa8ef96440119258c9286deceba0d8fcebc61ce7

@@ -63,6 +63,8 @@ Store it securely. Do not paste it into public documentation, screenshots, or is
 
 ## 3. Start the container
 
+If you want to copy a `docker-compose.yml` and `.env` template, start with the [Docker Compose template](compose.en.md). The `docker run` example below is useful for manual deployment or understanding each option.
+
 Replace `<your-host-or-ip>`, `<your-domain>`, `<random-64-hex-character-secret>`, and `<tag>` with your deployment values.
 
 ```bash

@@ -10,14 +10,16 @@
 
 1. 只需要官方标识/中继服务：参考 [RustDesk 官方自托管文档](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/)。
 2. 需要完整管理栈：阅读 [full-s6 集成镜像部署指南](docs/full-s6/deployment.zh-CN.md)。
-3. 已经部署旧版本：先阅读 [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md)。
-4. 需要配置客户端登录或排查连接问题：阅读 [客户端登录、MUST_LOGIN 与服务器配置排障指南](https://github.com/WeiYusc/rustdesk-api-web/blob/master/docs/client-login-and-server-config.zh-CN.md)。
+3. 想直接复制 Docker Compose 配置模板：阅读 [Docker Compose 模板](docs/full-s6/compose.zh-CN.md)。
+4. 已经部署旧版本：先阅读 [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md)。
+5. 需要配置客户端登录或排查连接问题：阅读 [客户端登录、MUST_LOGIN 与服务器配置排障指南](https://github.com/WeiYusc/rustdesk-api-web/blob/master/docs/client-login-and-server-config.zh-CN.md)。
 
 ### 文档目录
 
 | 任务 | 中文 | English |
 | --- | --- | --- |
 | 部署 full-s6 集成镜像 | [部署指南](docs/full-s6/deployment.zh-CN.md) | [Deployment guide](docs/full-s6/deployment.en.md) |
+| 复制 Docker Compose 配置模板 | [Compose 模板](docs/full-s6/compose.zh-CN.md) | [Compose template](docs/full-s6/compose.en.md) |
 | 升级与回滚 | [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md) | [Upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) |
 | 当前预览镜像说明 | [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md) | [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) |
 | 本地构建与 smoke | [docker/full-s6/README.md](docker/full-s6/README.md) | [docker/full-s6/README.md](docker/full-s6/README.md) |
@@ -26,10 +28,10 @@
 ### 当前推荐的预览镜像
 
 ```text
-ghcr.io/weiyusc/rustdesk-server-full-s6:preview-20260705-e1e8bbd-docs-guide
+ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
 ```
 
-该镜像已完成构建、GHCR 拉取、测试机部署、接口服务、管理后台和基础浏览器验证。详细摘要和边界见 [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md)。
+该镜像已完成构建、GHCR 拉取、测试机部署、接口服务、管理后台和基础浏览器验证。详细摘要和边界见 [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md)；该说明也记录了本次命名预览标签。
 
 > 当前没有发布 `latest` 标签。请使用明确的预览标签和摘要值部署。
 
@@ -78,14 +80,16 @@ cargo build --release
 
 1. If you only need the official ID/relay services, follow the [upstream RustDesk self-hosting documentation](https://rustdesk.com/docs/en/self-host/rustdesk-server-oss/).
 2. If you need the complete management stack, read the [full-s6 deployment guide](docs/full-s6/deployment.en.md).
-3. If you already run an older image, read the [upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) first.
-4. For client login or connection troubleshooting, read the [client login and server configuration guide](https://github.com/WeiYusc/rustdesk-api-web/blob/master/docs/client-login-and-server-config.en.md).
+3. If you want a copyable Compose template, read the [Docker Compose template](docs/full-s6/compose.en.md).
+4. If you already run an older image, read the [upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) first.
+5. For client login or connection troubleshooting, read the [client login and server configuration guide](https://github.com/WeiYusc/rustdesk-api-web/blob/master/docs/client-login-and-server-config.en.md).
 
 ### Documentation map
 
 | Task | 中文 | English |
 | --- | --- | --- |
 | Deploy the full-s6 integrated image | [部署指南](docs/full-s6/deployment.zh-CN.md) | [Deployment guide](docs/full-s6/deployment.en.md) |
+| Copy Docker Compose template | [Compose 模板](docs/full-s6/compose.zh-CN.md) | [Compose template](docs/full-s6/compose.en.md) |
 | Upgrade and rollback | [升级与回滚指南](docs/full-s6/upgrade-rollback.zh-CN.md) | [Upgrade and rollback guide](docs/full-s6/upgrade-rollback.en.md) |
 | Current preview image | [Preview 20260705 发布说明](docs/full-s6/release-notes-preview-20260705.zh-CN.md) | [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) |
 | Local build and smoke | [docker/full-s6/README.md](docker/full-s6/README.md) | [docker/full-s6/README.md](docker/full-s6/README.md) |
@@ -94,10 +98,10 @@ cargo build --release
 ### Current recommended preview image
 
 ```text
-ghcr.io/weiyusc/rustdesk-server-full-s6:preview-20260705-e1e8bbd-docs-guide
+ghcr.io/weiyusc/rustdesk-server-full-s6:v0.1.0-preview.1
 ```
 
-This image has passed build, GHCR pull, test-host deployment, API, Web Admin, and basic browser validation. See the [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) for details and limits.
+This image has passed build, GHCR pull, test-host deployment, API, Web Admin, and basic browser validation. See the [Preview 20260705 release notes](docs/full-s6/release-notes-preview-20260705.en.md) for details and limits; those notes also record the named preview tag.
 
 > No `latest` tag is published. Deploy with an explicit preview tag and digest.
 
