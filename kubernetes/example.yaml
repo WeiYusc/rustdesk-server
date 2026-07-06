@@ -1,3 +1,6 @@
+# Legacy upstream hbbs/hbbr-only Kubernetes example.
+# For the maintained WeiYusc full Web/API/server stack, use docs/full-s6/ and
+# ghcr.io/weiyusc/rustdesk-server-full-s6 instead.
 apiVersion: apps/v1
 kind: Deployment
 metadata:

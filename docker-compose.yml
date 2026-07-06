@@ -1,3 +1,6 @@
+# Legacy upstream hbbs/hbbr-only example.
+# For the maintained WeiYusc full Web/API/server stack, use docs/full-s6/compose.*.md
+# with ghcr.io/weiyusc/rustdesk-server-full-s6 instead.
 version: '3'
 
 networks:
