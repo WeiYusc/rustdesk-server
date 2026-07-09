@@ -181,6 +181,34 @@ fn prune_punch_requests(entries: &mut Vec<PunchReqEntry>, now: Instant) {
     }
 }
 
+fn has_matching_punch_request(
+    entries: &[PunchReqEntry],
+    responder_addr: SocketAddr,
+    response_addr: SocketAddr,
+    responder_id: &str,
+    now: Instant,
+) -> bool {
+    let responder_ip = try_into_v4(responder_addr).ip().to_string();
+    let response_ip = try_into_v4(response_addr).ip().to_string();
+    entries.iter().rev().any(|entry| {
+        now.duration_since(entry.tm).as_secs() <= PUNCH_REQ_RETENTION_SEC
+            && entry.to_id == responder_id
+            && entry.to_ip == responder_ip
+            && entry.from_ip == response_ip
+    })
+}
+
+async fn udp_punch_response_allowed(
+    responder_addr: SocketAddr,
+    response_addr: SocketAddr,
+    responder_id: &str,
+) -> bool {
+    let mut entries = PUNCH_REQS.lock().await;
+    let now = Instant::now();
+    prune_punch_requests(&mut entries, now);
+    has_matching_punch_request(&entries, responder_addr, response_addr, responder_id, now)
+}
+
 fn prune_ws_map_entries<T>(
     entries: &mut HashMap<SocketAddr, T>,
     now: Instant,
@@ -513,6 +541,41 @@ mod tests {
         let token = api_user_token("secret", 42, 1);
 
         assert!(authorize_punch_hole_token(true, "secret", &token).is_err());
+    }
+
+    fn punch_req_entry(from_ip: &str, to_ip: &str, to_id: &str) -> PunchReqEntry {
+        PunchReqEntry {
+            tm: Instant::now(),
+            from_ip: from_ip.to_owned(),
+            to_ip: to_ip.to_owned(),
+            to_id: to_id.to_owned(),
+        }
+    }
+
+    #[test]
+    fn udp_punch_response_without_matching_request_is_rejected() {
+        let entries = vec![punch_req_entry("198.51.100.10", "203.0.113.20", "peer-b")];
+
+        assert!(!has_matching_punch_request(
+            &entries,
+            "203.0.113.20:40000".parse().unwrap(),
+            "192.0.2.123:25565".parse().unwrap(),
+            "peer-b",
+            Instant::now(),
+        ));
+    }
+
+    #[test]
+    fn udp_punch_response_with_matching_request_is_allowed() {
+        let entries = vec![punch_req_entry("198.51.100.10", "203.0.113.20", "peer-b")];
+
+        assert!(has_matching_punch_request(
+            &entries,
+            "203.0.113.20:40000".parse().unwrap(),
+            "198.51.100.10:50000".parse().unwrap(),
+            "peer-b",
+            Instant::now(),
+        ));
     }
 
     #[test]
@@ -1600,7 +1663,7 @@ impl RendezvousServer {
         bytes: &BytesMut,
         addr: SocketAddr,
         socket: &mut FramedSocket,
-        key: &str,
+        _key: &str,
     ) -> ResultType<()> {
         if let Ok(msg_in) = RendezvousMessage::parse_from_bytes(bytes) {
             match msg_in.union {
@@ -1615,17 +1678,9 @@ impl RendezvousServer {
                         send_rk_res(socket, addr, res).await?;
                     }
                 }
-                Some(rendezvous_message::Union::PunchHoleRequest(ph)) => {
-                    if self.pm.is_in_memory(&ph.id).await {
-                        self.handle_udp_punch_hole_request(addr, ph, key).await?;
-                    } else {
-                        // not in memory, fetch from db with spawn in case blocking me
-                        let mut me = self.clone();
-                        let key = key.to_owned();
-                        tokio::spawn(async move {
-                            allow_err!(me.handle_udp_punch_hole_request(addr, ph, &key).await);
-                        });
-                    }
+                Some(rendezvous_message::Union::PunchHoleRequest(_ph)) => {
+                    // UDP PunchHoleRequest is intentionally unsupported.
+                    // The supported client path sends PunchHoleRequest over TCP/WS.
                 }
                 Some(rendezvous_message::Union::PunchHoleSent(phs)) => {
                     self.handle_hole_sent(phs, addr, Some(socket)).await?;
@@ -1979,9 +2034,19 @@ impl RendezvousServer {
     ) -> ResultType<()> {
         // punch hole sent from B, tell A that B is ready to be connected
         let addr_a = AddrMangle::decode(&phs.socket_addr);
+        let is_udp = socket.is_some();
+        if is_udp && !udp_punch_response_allowed(addr, addr_a, &phs.id).await {
+            log::warn!(
+                "Ignoring unsolicited UDP punch hole response from {} for peer {} to {}",
+                addr,
+                phs.id,
+                addr_a,
+            );
+            return Ok(());
+        }
         log::debug!(
             "{} punch hole response to {:?} from {:?}",
-            if socket.is_none() { "TCP" } else { "UDP" },
+            if is_udp { "UDP" } else { "TCP" },
             &addr_a,
             &addr
         );
@@ -2013,9 +2078,19 @@ impl RendezvousServer {
     ) -> ResultType<()> {
         // relay local addrs of B to A
         let addr_a = AddrMangle::decode(&la.socket_addr);
+        let is_udp = socket.is_some();
+        if is_udp && !udp_punch_response_allowed(addr, addr_a, &la.id).await {
+            log::warn!(
+                "Ignoring unsolicited UDP local address response from {} for peer {} to {}",
+                addr,
+                la.id,
+                addr_a,
+            );
+            return Ok(());
+        }
         log::debug!(
             "{} local addrs response to {:?} from {:?}",
-            if socket.is_none() { "TCP" } else { "UDP" },
+            if is_udp { "UDP" } else { "TCP" },
             &addr_a,
             &addr
         );
@@ -2303,24 +2378,6 @@ impl RendezvousServer {
         } else {
             self.send_to_tcp_sync(msg, addr).await?;
         }
-        Ok(())
-    }
-
-    #[inline]
-    async fn handle_udp_punch_hole_request(
-        &mut self,
-        addr: SocketAddr,
-        ph: PunchHoleRequest,
-        key: &str,
-    ) -> ResultType<()> {
-        let (msg, to_addr) = self.handle_punch_hole_request(addr, ph, key, false).await?;
-        self.tx.send(Data::Msg(
-            msg.into(),
-            match to_addr {
-                Some(addr) => addr,
-                None => addr,
-            },
-        ))?;
         Ok(())
     }
 
