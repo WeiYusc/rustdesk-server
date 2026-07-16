@@ -98,6 +98,10 @@ const MUST_LOGIN_RUNTIME_INHERIT: usize = 0;
 const MUST_LOGIN_RUNTIME_DISABLED: usize = 1;
 const MUST_LOGIN_RUNTIME_ENABLED: usize = 2;
 static MUST_LOGIN_RUNTIME: AtomicUsize = AtomicUsize::new(MUST_LOGIN_RUNTIME_INHERIT);
+const ENCRYPTED_ONLY_RUNTIME_INHERIT: usize = 0;
+const ENCRYPTED_ONLY_RUNTIME_DISABLED: usize = 1;
+const ENCRYPTED_ONLY_RUNTIME_ENABLED: usize = 2;
+static ENCRYPTED_ONLY_RUNTIME: AtomicUsize = AtomicUsize::new(ENCRYPTED_ONLY_RUNTIME_INHERIT);
 
 // Store punch hole requests
 use once_cell::sync::Lazy;
@@ -153,6 +157,11 @@ fn env_flag_enabled(name: &str) -> bool {
 }
 
 fn require_tcp_key_exchange_enabled() -> bool {
+    match ENCRYPTED_ONLY_RUNTIME.load(Ordering::SeqCst) {
+        ENCRYPTED_ONLY_RUNTIME_DISABLED => return false,
+        ENCRYPTED_ONLY_RUNTIME_ENABLED => return true,
+        _ => {}
+    }
     env_flag_enabled("REQUIRE_TCP_KEY_EXCHANGE") || env_flag_enabled("ENCRYPTED_ONLY")
 }
 
@@ -348,6 +357,7 @@ mod tests {
         _guard: TokioMutexGuard<'static, ()>,
         old_require_tcp_key_exchange: Option<String>,
         old_encrypted_only: Option<String>,
+        old_runtime: usize,
     }
 
     impl TcpKeyExchangeEnvGuard {
@@ -357,6 +367,7 @@ mod tests {
                 _guard: guard,
                 old_require_tcp_key_exchange: std::env::var("REQUIRE_TCP_KEY_EXCHANGE").ok(),
                 old_encrypted_only: std::env::var("ENCRYPTED_ONLY").ok(),
+                old_runtime: ENCRYPTED_ONLY_RUNTIME.load(Ordering::SeqCst),
             }
         }
     }
@@ -368,6 +379,7 @@ mod tests {
                 &self.old_require_tcp_key_exchange,
             );
             restore_env("ENCRYPTED_ONLY", &self.old_encrypted_only);
+            ENCRYPTED_ONLY_RUNTIME.store(self.old_runtime, Ordering::SeqCst);
         }
     }
 
@@ -489,6 +501,62 @@ mod tests {
         assert!(must_login_enabled());
         assert!(server.check_cmd("ml N").await.contains("MUST_LOGIN: false"));
         assert!(!must_login_enabled());
+    }
+
+    #[tokio::test]
+    async fn rendezvous_encrypted_only_command_reports_env_defaults() {
+        let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        ENCRYPTED_ONLY_RUNTIME.store(ENCRYPTED_ONLY_RUNTIME_INHERIT, Ordering::SeqCst);
+        std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
+        std::env::remove_var("ENCRYPTED_ONLY");
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let help = server.check_cmd("h").await;
+        assert!(
+            help.contains("encrypted-only(eo) [Y|N]"),
+            "help output: {help}"
+        );
+        assert!(server
+            .check_cmd("eo")
+            .await
+            .contains("ENCRYPTED_ONLY: false"));
+
+        std::env::set_var("ENCRYPTED_ONLY", "1");
+        assert!(server
+            .check_cmd("encrypted-only")
+            .await
+            .contains("ENCRYPTED_ONLY: true"));
+
+        std::env::remove_var("ENCRYPTED_ONLY");
+        std::env::set_var("REQUIRE_TCP_KEY_EXCHANGE", "yes");
+        assert!(server
+            .check_cmd("eo")
+            .await
+            .contains("ENCRYPTED_ONLY: true"));
+    }
+
+    #[tokio::test]
+    async fn rendezvous_encrypted_only_command_toggles_runtime_override() {
+        let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        ENCRYPTED_ONLY_RUNTIME.store(ENCRYPTED_ONLY_RUNTIME_INHERIT, Ordering::SeqCst);
+        std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
+        std::env::remove_var("ENCRYPTED_ONLY");
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        assert!(server
+            .check_cmd("eo Y")
+            .await
+            .contains("ENCRYPTED_ONLY: true"));
+        assert!(require_tcp_key_exchange_enabled());
+
+        std::env::set_var("ENCRYPTED_ONLY", "1");
+        assert!(server
+            .check_cmd("encrypted-only N")
+            .await
+            .contains("ENCRYPTED_ONLY: false"));
+        assert!(!require_tcp_key_exchange_enabled());
     }
 
     #[test]
@@ -1027,6 +1095,7 @@ mod tests {
     #[tokio::test]
     async fn encrypted_tcp_rejects_plaintext_before_key_exchange() {
         let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        ENCRYPTED_ONLY_RUNTIME.store(ENCRYPTED_ONLY_RUNTIME_INHERIT, Ordering::SeqCst);
         std::env::set_var("REQUIRE_TCP_KEY_EXCHANGE", "1");
         std::env::remove_var("ENCRYPTED_ONLY");
 
@@ -1059,6 +1128,7 @@ mod tests {
     #[tokio::test]
     async fn encrypted_only_rejects_plaintext_before_key_exchange() {
         let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        ENCRYPTED_ONLY_RUNTIME.store(ENCRYPTED_ONLY_RUNTIME_INHERIT, Ordering::SeqCst);
         std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
         std::env::set_var("ENCRYPTED_ONLY", "1");
 
@@ -1091,6 +1161,7 @@ mod tests {
     #[tokio::test]
     async fn tcp_listener_sends_phase1_by_default_when_server_key_is_configured() {
         let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        ENCRYPTED_ONLY_RUNTIME.store(ENCRYPTED_ONLY_RUNTIME_INHERIT, Ordering::SeqCst);
         std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
         std::env::remove_var("ENCRYPTED_ONLY");
 
@@ -1126,6 +1197,7 @@ mod tests {
     #[tokio::test]
     async fn plaintext_tcp_accepts_register_peer_with_server_key_when_exchange_not_required() {
         let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        ENCRYPTED_ONLY_RUNTIME.store(ENCRYPTED_ONLY_RUNTIME_INHERIT, Ordering::SeqCst);
         std::env::remove_var("REQUIRE_TCP_KEY_EXCHANGE");
         std::env::remove_var("ENCRYPTED_ONLY");
 
@@ -1196,6 +1268,7 @@ mod tests {
     async fn encrypted_websocket_completes_key_exchange_and_accepts_encrypted_register_peer_inner()
     {
         let _guard = TcpKeyExchangeEnvGuard::lock().await;
+        ENCRYPTED_ONLY_RUNTIME.store(ENCRYPTED_ONLY_RUNTIME_INHERIT, Ordering::SeqCst);
         std::env::set_var("REQUIRE_TCP_KEY_EXCHANGE", "1");
         std::env::remove_var("ENCRYPTED_ONLY");
 
@@ -2435,13 +2508,14 @@ impl RendezvousServer {
         match fds.next() {
             Some("h") => {
                 res = format!(
-                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
+                    "{}\n{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
                     "relay-servers(rs) <separated by ,>",
                     "ip-blocker(ib) [<ip>|<number>] [-]",
                     "ip-changes(ic) [<id>|<number>] [-]",
                     "punch-requests(pr) [<number>] [-]",
                     "always-use-relay(aur)",
                     "must-login(ml) [Y|N]",
+                    "encrypted-only(eo) [Y|N]",
                     "test-geo(tg) <ip1> <ip2>"
                 )
             }
@@ -2597,6 +2671,26 @@ impl RendezvousServer {
                     }
                 }
                 let _ = writeln!(res, "MUST_LOGIN: {}", must_login_enabled());
+            }
+            Some("encrypted-only" | "eo") => {
+                if let Some(rs) = fds.next() {
+                    match rs.to_ascii_lowercase().as_str() {
+                        "y" | "1" | "true" | "yes" | "on" => {
+                            ENCRYPTED_ONLY_RUNTIME
+                                .store(ENCRYPTED_ONLY_RUNTIME_ENABLED, Ordering::SeqCst);
+                        }
+                        "n" | "0" | "false" | "no" | "off" => {
+                            ENCRYPTED_ONLY_RUNTIME
+                                .store(ENCRYPTED_ONLY_RUNTIME_DISABLED, Ordering::SeqCst);
+                        }
+                        _ => {}
+                    }
+                }
+                let _ = writeln!(
+                    res,
+                    "ENCRYPTED_ONLY: {}",
+                    require_tcp_key_exchange_enabled()
+                );
             }
             Some("test-geo" | "tg") => {
                 if let Some(rs) = fds.next() {
