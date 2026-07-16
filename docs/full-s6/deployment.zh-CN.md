@@ -112,8 +112,10 @@ docker run -d \
 
 说明：
 
+- `RUSTDESK_API_JWT_KEY` 对启用 `MUST_LOGIN` 的部署是必要参数。API 用它签发客户端登录 token，`hbbs` 用同一个值校验 token。缺失或不一致时，客户端即使账号密码或 WebAuth 登录成功，连接时仍会报 `login-required`，服务端日志常见 `invalid login token`。
 - `MUST_LOGIN` 是启动默认值。管理后台里的“要求客户端登录”会通过 `hbbs` 运行时命令即时生效；容器或 `hbbs` 重启后，会回到环境变量的默认值。
-- 邮件、数据库等更多接口服务变量请参考 `rustdesk-api` 文档。首次部署建议先使用默认 SQLite，确认基础链路可用后再切换数据库。
+- 如果使用 Compose `secrets` 挂载 `id_ed25519` / `id_ed25519.pub`，这两个文件必须是有效 RustDesk 服务端 Ed25519 密钥对。客户端 Key 必须来自同一份 `id_ed25519.pub`；更换密钥后客户端需要更新服务器 Key。
+- MySQL、密钥创建、参数必要性和故障后果示例见 [Docker Compose 模板](compose.zh-CN.md#8-参数说明与常见后果)。首次部署建议先使用默认 SQLite，确认基础链路可用后再切换 MySQL。
 
 ## 5. 首次登录与密码重置
 
