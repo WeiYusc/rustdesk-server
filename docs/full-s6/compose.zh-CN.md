@@ -202,6 +202,8 @@ curl -fsSI https://<your-domain>/_admin/ | head -5
 | `RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL` | 可选，full-s6 默认 `60` | API heartbeat 可被视为在线的最大秒数。 | 过低可能导致在线灯闪烁离线；过高可能让陈旧 UI 在线状态保留太久。 |
 | MySQL 相关 `RUSTDESK_API_MYSQL_*` | 可选 | 切换 API 数据库到 MySQL。 | 数据库地址、账号、TLS 或库名错误会导致 API 启动失败；建议先用 SQLite 跑通基础链路，再切 MySQL。 |
 
+Web 管理后台的 **我的 → 地址簿** 页面在列出条目时，也会从 API heartbeat 状态（`peers.last_online_time`）推导 `online` / `sameServer`。`address_books.online` 存储列只是旧的快照字段，排查 Web 面板在线状态时不要把它当作权威来源。
+
 ### 8.3 服务端密钥和 Compose `secrets`
 
 如果使用：

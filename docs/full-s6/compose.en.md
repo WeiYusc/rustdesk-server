@@ -203,6 +203,8 @@ For detailed upgrade and rollback steps, see:
 | `RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL` | Optional, full-s6 default `60` | Maximum age in seconds for API heartbeat to count as online. | Too low may flicker offline; too high may keep stale UI online indicators. |
 | MySQL `RUSTDESK_API_MYSQL_*` | Optional | Switch the API database to MySQL. | Wrong address, account, TLS, or database name can stop the API from starting. Start with SQLite first unless you need MySQL. |
 
+Web Admin's **My → Address Book** page also derives the `online` / `sameServer` fields from API heartbeat state (`peers.last_online_time`) when listing rows. The stored `address_books.online` column is only a legacy snapshot and should not be used as the source of truth when auditing the Web panel.
+
 ### 8.3 Server keys and Compose `secrets`
 
 If you use:
