@@ -34,9 +34,14 @@ use ipnetwork::Ipv4Network;
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::Deserialize;
 use sodiumoxide::crypto::{box_, secretbox, sign};
+use sqlx::{
+    sqlite::SqliteConnectOptions, ConnectOptions, Connection, QueryBuilder, Row, Sqlite,
+    SqliteConnection,
+};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr},
+    str::FromStr,
     sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     sync::Arc,
     time::Instant,
@@ -312,6 +317,69 @@ fn login_required_response() -> RendezvousMessage {
     msg_out
 }
 
+fn online_fallback_enabled() -> bool {
+    env_flag_enabled("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT")
+}
+
+fn online_fallback_ttl_seconds() -> i64 {
+    std::env::var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL")
+        .ok()
+        .and_then(|value| value.parse::<i64>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(60)
+}
+
+fn unix_timestamp_now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+async fn api_heartbeat_fallback_onlines(peer_ids: &[String]) -> HashSet<String> {
+    if peer_ids.is_empty() || !online_fallback_enabled() {
+        return HashSet::new();
+    }
+    let Ok(db_path) = std::env::var("RUSTDESK_ONLINE_FALLBACK_API_DB") else {
+        return HashSet::new();
+    };
+    if db_path.is_empty() || !std::path::Path::new(&db_path).exists() {
+        return HashSet::new();
+    }
+    let Ok(mut opt) = SqliteConnectOptions::from_str(&db_path) else {
+        log::debug!("invalid online fallback API DB path at {db_path}");
+        return HashSet::new();
+    };
+    opt = opt.read_only(true).create_if_missing(false);
+    opt.log_statements(log::LevelFilter::Trace);
+    let Ok(mut conn) = SqliteConnection::connect_with(&opt).await else {
+        log::debug!("failed to open online fallback API DB at {db_path}");
+        return HashSet::new();
+    };
+    let ttl = online_fallback_ttl_seconds();
+    let min_last_online_time = unix_timestamp_now().saturating_sub(ttl);
+    let mut query: QueryBuilder<Sqlite> = QueryBuilder::new(
+        "select id from peers where last_online_time > 0 and last_online_time >= ",
+    );
+    query.push_bind(min_last_online_time);
+    query.push(" and id in (");
+    let mut separated = query.separated(", ");
+    for peer_id in peer_ids {
+        separated.push_bind(peer_id);
+    }
+    separated.push_unseparated(")");
+    let rows = match query.build().fetch_all(&mut conn).await {
+        Ok(rows) => rows,
+        Err(err) => {
+            log::debug!("failed to query online fallback API DB: {err}");
+            return HashSet::new();
+        }
+    };
+    rows.into_iter()
+        .filter_map(|row| row.try_get::<String, _>("id").ok())
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -359,6 +427,34 @@ mod tests {
     }
 
     static TCP_KEY_EXCHANGE_TEST_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new(()));
+    static ONLINE_FALLBACK_TEST_LOCK: Lazy<TokioMutex<()>> = Lazy::new(|| TokioMutex::new(()));
+
+    struct OnlineFallbackEnvGuard {
+        _guard: TokioMutexGuard<'static, ()>,
+        old_enabled: Option<String>,
+        old_db: Option<String>,
+        old_ttl: Option<String>,
+    }
+
+    impl OnlineFallbackEnvGuard {
+        async fn lock() -> Self {
+            let guard = ONLINE_FALLBACK_TEST_LOCK.lock().await;
+            Self {
+                _guard: guard,
+                old_enabled: std::env::var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT").ok(),
+                old_db: std::env::var("RUSTDESK_ONLINE_FALLBACK_API_DB").ok(),
+                old_ttl: std::env::var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL").ok(),
+            }
+        }
+    }
+
+    impl Drop for OnlineFallbackEnvGuard {
+        fn drop(&mut self) {
+            restore_env("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT", &self.old_enabled);
+            restore_env("RUSTDESK_ONLINE_FALLBACK_API_DB", &self.old_db);
+            restore_env("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL", &self.old_ttl);
+        }
+    }
 
     struct TcpKeyExchangeEnvGuard {
         _guard: TokioMutexGuard<'static, ()>,
@@ -1280,6 +1376,148 @@ mod tests {
         drop(client_sink);
         drop(client_stream);
         assert!(timeout(1_000, server_task).await.unwrap().unwrap().is_ok());
+    }
+
+    fn unix_now() -> i64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64
+    }
+
+    async fn write_api_heartbeat_db(rows: &[(&str, i64)]) -> String {
+        static NEXT_DB: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let path = std::env::temp_dir().join(format!(
+            "rustdesk-api-heartbeat-{}-{}.sqlite3",
+            std::process::id(),
+            NEXT_DB.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
+        ));
+        std::fs::File::create(&path).unwrap();
+        let path_str = path.to_string_lossy().to_string();
+        let mut conn = SqliteConnection::connect(&path_str).await.unwrap();
+        sqlx::query("create table peers (id text primary key, last_online_time integer not null)")
+            .execute(&mut conn)
+            .await
+            .unwrap();
+        for (id, last_online_time) in rows {
+            sqlx::query("insert into peers(id, last_online_time) values(?, ?)")
+                .bind(id)
+                .bind(last_online_time)
+                .execute(&mut conn)
+                .await
+                .unwrap();
+        }
+        path_str
+    }
+
+    #[tokio::test]
+    async fn online_request_fallback_is_disabled_by_default() {
+        let _guard = OnlineFallbackEnvGuard::lock().await;
+        std::env::remove_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT");
+        let db = write_api_heartbeat_db(&[("api-peer", unix_now())]).await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_DB", db);
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let states = server
+            .online_states_for_peers(&["api-peer".to_owned()])
+            .await;
+
+        assert_eq!(states[0], 0);
+    }
+
+    #[tokio::test]
+    async fn online_request_fallback_marks_recent_api_heartbeat_online() {
+        let _guard = OnlineFallbackEnvGuard::lock().await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT", "Y");
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL", "60");
+        let db = write_api_heartbeat_db(&[("api-peer", unix_now())]).await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_DB", db);
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let states = server
+            .online_states_for_peers(&["api-peer".to_owned()])
+            .await;
+
+        assert_eq!(states[0], 0b1000_0000);
+    }
+
+    #[tokio::test]
+    async fn online_request_fallback_keeps_stale_api_heartbeat_offline() {
+        let _guard = OnlineFallbackEnvGuard::lock().await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT", "Y");
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL", "60");
+        let db = write_api_heartbeat_db(&[("api-peer", unix_now() - 600)]).await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_DB", db);
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let states = server
+            .online_states_for_peers(&["api-peer".to_owned()])
+            .await;
+
+        assert_eq!(states[0], 0);
+    }
+
+    #[tokio::test]
+    async fn online_request_fallback_fails_closed_when_db_is_missing() {
+        let _guard = OnlineFallbackEnvGuard::lock().await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT", "Y");
+        std::env::set_var(
+            "RUSTDESK_ONLINE_FALLBACK_API_DB",
+            "/tmp/rustdesk-api-heartbeat-missing.sqlite3",
+        );
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let states = server
+            .online_states_for_peers(&["api-peer".to_owned()])
+            .await;
+
+        assert_eq!(states[0], 0);
+    }
+
+    #[tokio::test]
+    async fn online_request_native_online_does_not_need_api_fallback() {
+        let _guard = OnlineFallbackEnvGuard::lock().await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT", "Y");
+        std::env::set_var(
+            "RUSTDESK_ONLINE_FALLBACK_API_DB",
+            "/tmp/rustdesk-api-heartbeat-missing.sqlite3",
+        );
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+        let peer = server.pm.get_or("native-peer").await;
+        peer.write().await.last_reg_time = Instant::now();
+
+        let states = server
+            .online_states_for_peers(&["native-peer".to_owned()])
+            .await;
+
+        assert_eq!(states[0], 0b1000_0000);
+    }
+
+    #[tokio::test]
+    async fn online_request_fallback_sets_expected_bits_for_mixed_peers() {
+        let _guard = OnlineFallbackEnvGuard::lock().await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT", "Y");
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL", "60");
+        let db =
+            write_api_heartbeat_db(&[("fresh", unix_now()), ("stale", unix_now() - 600)]).await;
+        std::env::set_var("RUSTDESK_ONLINE_FALLBACK_API_DB", db);
+        let (tx, _rx) = mpsc::unbounded_channel::<Data>();
+        let server = test_rendezvous_server(tx).await;
+
+        let states = server
+            .online_states_for_peers(&[
+                "fresh".to_owned(),
+                "stale".to_owned(),
+                "missing".to_owned(),
+            ])
+            .await;
+
+        assert_eq!(states[0], 0b1000_0000);
     }
 
     #[test]
@@ -2565,23 +2803,39 @@ impl RendezvousServer {
     }
 
     #[inline]
+    async fn online_states_for_peers(&self, peers: &[String]) -> BytesMut {
+        let mut states = BytesMut::zeroed((peers.len() + 7) / 8);
+        let mut fallback_candidates = Vec::new();
+        let mut native_online = vec![false; peers.len()];
+        for (i, peer_id) in peers.iter().enumerate() {
+            native_online[i] = if let Some(peer) = self.pm.get_in_memory(peer_id).await {
+                let elapsed = peer.read().await.last_reg_time.elapsed().as_millis() as i64;
+                elapsed < REG_TIMEOUT
+            } else {
+                false
+            };
+            if !native_online[i] {
+                fallback_candidates.push(peer_id.clone());
+            }
+        }
+        let fallback_onlines = api_heartbeat_fallback_onlines(&fallback_candidates).await;
+        for (i, peer_id) in peers.iter().enumerate() {
+            if native_online[i] || fallback_onlines.contains(peer_id) {
+                let states_idx = i / 8;
+                let bit_idx = 7 - i % 8;
+                states[states_idx] |= 0x01 << bit_idx;
+            }
+        }
+        states
+    }
+
+    #[inline]
     async fn handle_online_request(
         &mut self,
         stream: &mut FramedStream,
         peers: Vec<String>,
     ) -> ResultType<()> {
-        let mut states = BytesMut::zeroed((peers.len() + 7) / 8);
-        for (i, peer_id) in peers.iter().enumerate() {
-            if let Some(peer) = self.pm.get_in_memory(peer_id).await {
-                let elapsed = peer.read().await.last_reg_time.elapsed().as_millis() as i64;
-                // bytes index from left to right
-                let states_idx = i / 8;
-                let bit_idx = 7 - i % 8;
-                if elapsed < REG_TIMEOUT {
-                    states[states_idx] |= 0x01 << bit_idx;
-                }
-            }
-        }
+        let states = self.online_states_for_peers(&peers).await;
 
         let mut msg_out = RendezvousMessage::new();
         msg_out.set_online_response(OnlineResponse {

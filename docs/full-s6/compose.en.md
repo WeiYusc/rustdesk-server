@@ -49,6 +49,9 @@ services:
       RUSTDESK_API_RUSTDESK_KEY_FILE: /data/id_ed25519.pub
       RUSTDESK_API_JWT_KEY: ${RUSTDESK_API_JWT_KEY:?set RUSTDESK_API_JWT_KEY}
       MUST_LOGIN: ${MUST_LOGIN:-N}
+      RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT: ${RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT:-Y}
+      RUSTDESK_ONLINE_FALLBACK_API_DB: ${RUSTDESK_ONLINE_FALLBACK_API_DB:-/app/data/rustdeskapi.db}
+      RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL: ${RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL:-60}
     healthcheck:
       test: ["CMD", "/usr/bin/healthcheck.sh"]
       interval: 10s
@@ -85,6 +88,15 @@ RUSTDESK_API_JWT_KEY=replace-with-random-64-hex-character-secret
 # Startup default for forced client login.
 # N = disabled, Y = enabled. The Web Admin runtime toggle is not database-persistent.
 MUST_LOGIN=N
+
+# Address-book online fallback for the full-s6 image.
+# When hbbs in-memory presence is stale, 21115 OnlineRequest may use recent API
+# heartbeat timestamps from the shared SQLite database. This only affects the
+# online indicator returned to clients; it does not grant authentication or
+# connection permissions.
+RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT=Y
+RUSTDESK_ONLINE_FALLBACK_API_DB=/app/data/rustdeskapi.db
+RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL=60
 ```
 
 Generate a random secret:
@@ -186,6 +198,9 @@ For detailed upgrade and rollback steps, see:
 | `ENCRYPTED_ONLY` / `REQUIRE_TCP_KEY_EXCHANGE` | Optional | Require TCP/WS KeyExchange before application messages. | Clients must have the correct server Key. Old clients or wrong keys may be rejected with `Rejecting unencrypted TCP/WS message ... before key exchange`. Start with it disabled until the base stack works. |
 | `RUSTDESK_FULL_S6_IMAGE` | Optional | Image tag. Pin a stable tag or digest for production; `latest` is a moving stable tag. | Moving tags can change behavior on upgrade; old tags may miss new fixes and toggles. |
 | `RUSTDESK_API_GIN_TRUST_PROXY` | Optional | Trusted reverse proxy address for API/Web Admin, for example `127.0.0.1` when Nginx, BT Panel, or Caddy proxies to the API locally. | If omitted behind a reverse proxy, login logs and device `last_online_ip` show the proxy address, commonly `127.0.0.1`, instead of the real client IP. Do not trust broad ranges when the API port is directly exposed. |
+| `RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT` | Optional, SQLite full-s6 default `Y`, MySQL example `N` | Lets hbbs 21115 OnlineRequest fall back to recent API heartbeat timestamps when native hbbs in-memory presence is stale. | If disabled or pointed at the wrong DB, address-book devices may still show offline even while API heartbeat and relay are active. It only affects the online indicator, not authentication or connection authorization. |
+| `RUSTDESK_ONLINE_FALLBACK_API_DB` | Optional, full-s6 default `/app/data/rustdeskapi.db` | SQLite database path used by the online fallback. | Must point at the API SQLite database. For MySQL deployments this fallback is not used unless a compatible local SQLite heartbeat mirror exists. |
+| `RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL` | Optional, full-s6 default `60` | Maximum age in seconds for API heartbeat to count as online. | Too low may flicker offline; too high may keep stale UI online indicators. |
 | MySQL `RUSTDESK_API_MYSQL_*` | Optional | Switch the API database to MySQL. | Wrong address, account, TLS, or database name can stop the API from starting. Start with SQLite first unless you need MySQL. |
 
 ### 8.3 Server keys and Compose `secrets`
@@ -247,6 +262,7 @@ services:
       - RUSTDESK_API_RUSTDESK_API_SERVER=${API_SERVER:?set API_SERVER}
       - RUSTDESK_API_RUSTDESK_KEY_FILE=/data/id_ed25519.pub
       - RUSTDESK_API_JWT_KEY=${RUSTDESK_API_JWT_KEY:?set RUSTDESK_API_JWT_KEY}
+      - RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT=N
     volumes:
       - ./data/server:/data
       - ./data/app:/app/data

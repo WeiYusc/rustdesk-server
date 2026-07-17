@@ -7,4 +7,18 @@ if [ "${ENCRYPTED_ONLY:-0}" = "1" ]; then
   PARAMS="-k _"
 fi
 
+if [ -z "${RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT+x}" ]; then
+  if [ "${RUSTDESK_API_GORM_TYPE:-sqlite}" = "sqlite" ]; then
+    export RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT=Y
+  else
+    export RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT=N
+  fi
+fi
+if [ -z "${RUSTDESK_ONLINE_FALLBACK_API_DB+x}" ]; then
+  export RUSTDESK_ONLINE_FALLBACK_API_DB=/app/data/rustdeskapi.db
+fi
+if [ -z "${RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL+x}" ]; then
+  export RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL=60
+fi
+
 exec /usr/bin/hbbs -r "${RELAY:-127.0.0.1:21117}" $PARAMS

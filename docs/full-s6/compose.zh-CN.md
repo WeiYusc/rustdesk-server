@@ -49,6 +49,9 @@ services:
       RUSTDESK_API_RUSTDESK_KEY_FILE: /data/id_ed25519.pub
       RUSTDESK_API_JWT_KEY: ${RUSTDESK_API_JWT_KEY:?set RUSTDESK_API_JWT_KEY}
       MUST_LOGIN: ${MUST_LOGIN:-N}
+      RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT: ${RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT:-Y}
+      RUSTDESK_ONLINE_FALLBACK_API_DB: ${RUSTDESK_ONLINE_FALLBACK_API_DB:-/app/data/rustdeskapi.db}
+      RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL: ${RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL:-60}
     healthcheck:
       test: ["CMD", "/usr/bin/healthcheck.sh"]
       interval: 10s
@@ -85,6 +88,14 @@ RUSTDESK_API_JWT_KEY=replace-with-random-64-hex-character-secret
 # 强制客户端登录的启动默认值。
 # N = 不启用，Y = 启用。管理后台的运行时开关不会写入数据库。
 MUST_LOGIN=N
+
+# full-s6 地址簿在线状态 fallback。
+# 当 hbbs 内存在线状态过期时，21115 OnlineRequest 可读取共享 SQLite 中
+# API heartbeat 的最近在线时间。它只影响客户端在线指示灯，不授予认证、
+# 授权或连接权限。
+RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT=Y
+RUSTDESK_ONLINE_FALLBACK_API_DB=/app/data/rustdeskapi.db
+RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL=60
 ```
 
 生成随机密钥：
@@ -186,6 +197,9 @@ curl -fsSI https://<your-domain>/_admin/ | head -5
 | `ENCRYPTED_ONLY` / `REQUIRE_TCP_KEY_EXCHANGE` | 可选 | 强制 TCP/WS 在应用消息前完成 KeyExchange。 | 开启后客户端必须配置正确 Key；旧客户端或 Key 错误会被拒绝，日志可能出现 `Rejecting unencrypted TCP/WS message ... before key exchange`。首次部署建议先关闭，基础链路跑通后再启用。 |
 | `RUSTDESK_FULL_S6_IMAGE` | 可选 | 镜像标签。建议生产固定稳定标签或 digest；`latest` 是稳定版浮动标签。 | 使用浮动标签可能在升级时引入新行为；使用过旧标签可能缺少新开关或修复。 |
 | `RUSTDESK_API_GIN_TRUST_PROXY` | 可选 | 当 API/Web 管理后台放在 Nginx、宝塔、Caddy 等反向代理后面时，填写可信反代地址，例如 `127.0.0.1`。 | 未配置时，登录日志和设备管理“最后在线 IP”会显示反代地址（常见为 `127.0.0.1`），而不是真实客户端公网 IP。不要在 API 直接暴露到公网时盲目信任所有来源。 |
+| `RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT` | 可选，SQLite full-s6 默认 `Y`，MySQL 示例为 `N` | 当 hbbs 原生内存在线状态过期时，允许 21115 OnlineRequest 使用 API heartbeat 的最近在线时间作为地址簿在线状态 fallback。 | 关闭或 DB 配错时，即使 API heartbeat 和 relay 活跃，地址簿仍可能显示离线。它只影响在线指示灯，不授予认证或连接权限。 |
+| `RUSTDESK_ONLINE_FALLBACK_API_DB` | 可选，full-s6 默认 `/app/data/rustdeskapi.db` | 在线状态 fallback 使用的 SQLite 数据库路径。 | 必须指向 API SQLite 数据库。MySQL 部署默认不使用该 fallback，除非另有兼容的本地 SQLite heartbeat mirror。 |
+| `RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT_TTL` | 可选，full-s6 默认 `60` | API heartbeat 可被视为在线的最大秒数。 | 过低可能导致在线灯闪烁离线；过高可能让陈旧 UI 在线状态保留太久。 |
 | MySQL 相关 `RUSTDESK_API_MYSQL_*` | 可选 | 切换 API 数据库到 MySQL。 | 数据库地址、账号、TLS 或库名错误会导致 API 启动失败；建议先用 SQLite 跑通基础链路，再切 MySQL。 |
 
 ### 8.3 服务端密钥和 Compose `secrets`
@@ -247,6 +261,7 @@ services:
       - RUSTDESK_API_RUSTDESK_API_SERVER=${API_SERVER:?set API_SERVER}
       - RUSTDESK_API_RUSTDESK_KEY_FILE=/data/id_ed25519.pub
       - RUSTDESK_API_JWT_KEY=${RUSTDESK_API_JWT_KEY:?set RUSTDESK_API_JWT_KEY}
+      - RUSTDESK_ONLINE_FALLBACK_API_HEARTBEAT=N
     volumes:
       - ./data/server:/data
       - ./data/app:/app/data
