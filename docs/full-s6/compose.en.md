@@ -185,6 +185,7 @@ For detailed upgrade and rollback steps, see:
 | `MUST_LOGIN` | Optional | Startup default for forced client login: `Y` enables it, `N` disables it. | When enabled, `RUSTDESK_API_JWT_KEY` must be set and clients must log in again. Otherwise connections fail with `login-required`. |
 | `ENCRYPTED_ONLY` / `REQUIRE_TCP_KEY_EXCHANGE` | Optional | Require TCP/WS KeyExchange before application messages. | Clients must have the correct server Key. Old clients or wrong keys may be rejected with `Rejecting unencrypted TCP/WS message ... before key exchange`. Start with it disabled until the base stack works. |
 | `RUSTDESK_FULL_S6_IMAGE` | Optional | Image tag. Pin a stable tag or digest for production; `latest` is a moving stable tag. | Moving tags can change behavior on upgrade; old tags may miss new fixes and toggles. |
+| `RUSTDESK_API_GIN_TRUST_PROXY` | Optional | Trusted reverse proxy address for API/Web Admin, for example `127.0.0.1` when Nginx, BT Panel, or Caddy proxies to the API locally. | If omitted behind a reverse proxy, login logs and device `last_online_ip` show the proxy address, commonly `127.0.0.1`, instead of the real client IP. Do not trust broad ranges when the API port is directly exposed. |
 | MySQL `RUSTDESK_API_MYSQL_*` | Optional | Switch the API database to MySQL. | Wrong address, account, TLS, or database name can stop the API from starting. Start with SQLite first unless you need MySQL. |
 
 ### 8.3 Server keys and Compose `secrets`
@@ -292,6 +293,12 @@ RUSTDESK_API_JWT_KEY=replace-with-random-64-hex-character-secret
 # Optional startup defaults.
 MUST_LOGIN=Y
 ENCRYPTED_ONLY=0
+
+# Optional: set this when API/Web Admin is behind a local reverse proxy such as
+# Nginx, BT Panel, or Caddy. It lets the API trust X-Forwarded-For from that
+# proxy so login logs and device "last online IP" show the real client IP.
+# Do not use a broad value when the API port is directly exposed to untrusted clients.
+# RUSTDESK_API_GIN_TRUST_PROXY=127.0.0.1
 ```
 
 Additional MySQL notes:

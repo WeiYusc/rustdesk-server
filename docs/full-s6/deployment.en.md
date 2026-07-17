@@ -109,11 +109,13 @@ For a temporary local check, `http://<your-host-or-ip>:21114` can be used as the
 | `RUSTDESK_API_RUSTDESK_KEY_FILE` | Server public key path | `/data/id_ed25519.pub` |
 | `RUSTDESK_API_JWT_KEY` | Login-token signing secret | a random value |
 | `MUST_LOGIN` | Default forced-login state at container startup | `Y` or `N` |
+| `RUSTDESK_API_GIN_TRUST_PROXY` | Trusted reverse proxy address for API/Web Admin when Nginx, BT Panel, or Caddy proxies to the API locally | `127.0.0.1` |
 
 Notes:
 
 - `RUSTDESK_API_JWT_KEY` is required when `MUST_LOGIN` is enabled. The API uses it to sign client login tokens, and `hbbs` validates tokens with the same value. If it is missing or inconsistent, clients can log in with password or WebAuth but still fail connections with `login-required`; hbbs usually logs `invalid login token`.
 - `MUST_LOGIN` is the startup default. The Web Admin toggle applies an `hbbs` runtime command immediately; after the container or `hbbs` restarts, the environment variable default applies again.
+- Set `RUSTDESK_API_GIN_TRUST_PROXY=127.0.0.1` when API/Web Admin is served through a local reverse proxy. Otherwise Gin sees the proxy as the client and Web Admin login logs plus device `last_online_ip` may show `127.0.0.1`. Only trust proxy addresses you control; do not use broad values when exposing the API port directly.
 - If Compose `secrets` mount `id_ed25519` / `id_ed25519.pub`, both files must be a valid RustDesk Ed25519 server key pair. Client Key must come from the same `id_ed25519.pub`; changing the pair requires updating clients.
 - For MySQL, key creation, required/optional parameters, and failure modes, see the [Docker Compose template](compose.en.md#8-parameters-and-common-failure-modes). For first deployment, start with the default SQLite path until the basic stack works, then switch to MySQL if needed.
 

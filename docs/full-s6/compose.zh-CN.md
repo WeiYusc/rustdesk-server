@@ -185,6 +185,7 @@ curl -fsSI https://<your-domain>/_admin/ | head -5
 | `MUST_LOGIN` | 可选 | 启动时强制客户端登录的默认值，`Y` 开启，`N` 关闭。 | 开启后必须配置 `RUSTDESK_API_JWT_KEY`，并要求客户端重新登录；否则连接报 `login-required`。关闭后未登录客户端也可按普通 RustDesk 行为尝试连接。 |
 | `ENCRYPTED_ONLY` / `REQUIRE_TCP_KEY_EXCHANGE` | 可选 | 强制 TCP/WS 在应用消息前完成 KeyExchange。 | 开启后客户端必须配置正确 Key；旧客户端或 Key 错误会被拒绝，日志可能出现 `Rejecting unencrypted TCP/WS message ... before key exchange`。首次部署建议先关闭，基础链路跑通后再启用。 |
 | `RUSTDESK_FULL_S6_IMAGE` | 可选 | 镜像标签。建议生产固定稳定标签或 digest；`latest` 是稳定版浮动标签。 | 使用浮动标签可能在升级时引入新行为；使用过旧标签可能缺少新开关或修复。 |
+| `RUSTDESK_API_GIN_TRUST_PROXY` | 可选 | 当 API/Web 管理后台放在 Nginx、宝塔、Caddy 等反向代理后面时，填写可信反代地址，例如 `127.0.0.1`。 | 未配置时，登录日志和设备管理“最后在线 IP”会显示反代地址（常见为 `127.0.0.1`），而不是真实客户端公网 IP。不要在 API 直接暴露到公网时盲目信任所有来源。 |
 | MySQL 相关 `RUSTDESK_API_MYSQL_*` | 可选 | 切换 API 数据库到 MySQL。 | 数据库地址、账号、TLS 或库名错误会导致 API 启动失败；建议先用 SQLite 跑通基础链路，再切 MySQL。 |
 
 ### 8.3 服务端密钥和 Compose `secrets`
@@ -292,6 +293,11 @@ RUSTDESK_API_JWT_KEY=replace-with-random-64-hex-character-secret
 # 可选：启动默认值。
 MUST_LOGIN=Y
 ENCRYPTED_ONLY=0
+
+# 可选：当 API/Web 管理后台经过本机 Nginx、宝塔、Caddy 等反代时设置。
+# 这会让 API 信任该反代传入的 X-Forwarded-For，使登录日志和设备“最后在线 IP”
+# 显示真实客户端公网 IP。API 端口若直接暴露给不可信客户端，不要配置过宽的信任范围。
+# RUSTDESK_API_GIN_TRUST_PROXY=127.0.0.1
 ```
 
 MySQL 方案的额外注意事项：

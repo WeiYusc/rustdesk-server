@@ -109,11 +109,13 @@ docker run -d \
 | `RUSTDESK_API_RUSTDESK_KEY_FILE` | 服务端公钥文件路径 | `/data/id_ed25519.pub` |
 | `RUSTDESK_API_JWT_KEY` | 登录令牌签名密钥 | 使用随机值 |
 | `MUST_LOGIN` | 容器启动时的强制登录默认值 | `Y` 或 `N` |
+| `RUSTDESK_API_GIN_TRUST_PROXY` | API/Web 管理后台经过本机 Nginx、宝塔、Caddy 等反代时信任的反代地址 | `127.0.0.1` |
 
 说明：
 
 - `RUSTDESK_API_JWT_KEY` 对启用 `MUST_LOGIN` 的部署是必要参数。API 用它签发客户端登录 token，`hbbs` 用同一个值校验 token。缺失或不一致时，客户端即使账号密码或 WebAuth 登录成功，连接时仍会报 `login-required`，服务端日志常见 `invalid login token`。
 - `MUST_LOGIN` 是启动默认值。管理后台里的“要求客户端登录”会通过 `hbbs` 运行时命令即时生效；容器或 `hbbs` 重启后，会回到环境变量的默认值。
+- 如果 API/Web 管理后台经过本机反向代理访问，请设置 `RUSTDESK_API_GIN_TRUST_PROXY=127.0.0.1`。否则 Gin 会把反代当成客户端，管理后台登录日志和设备“最后在线 IP”可能显示 `127.0.0.1`。只信任你控制的反代地址；API 端口直接暴露给不可信客户端时不要配置过宽的信任范围。
 - 如果使用 Compose `secrets` 挂载 `id_ed25519` / `id_ed25519.pub`，这两个文件必须是有效 RustDesk 服务端 Ed25519 密钥对。客户端 Key 必须来自同一份 `id_ed25519.pub`；更换密钥后客户端需要更新服务器 Key。
 - MySQL、密钥创建、参数必要性和故障后果示例见 [Docker Compose 模板](compose.zh-CN.md#8-参数说明与常见后果)。首次部署建议先使用默认 SQLite，确认基础链路可用后再切换 MySQL。
 
